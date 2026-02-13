@@ -10,9 +10,13 @@ This agent:
 """
 
 import os
+import json
 from datetime import datetime
 import asyncio
 from github import Github
+from azure.identity import DefaultAzureCredential
+from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
+from azure.servicebus import ServiceBusMessage
 
 
 class ResolutionAgent:
@@ -23,9 +27,15 @@ class ResolutionAgent:
         self.repo_name = os.getenv("GITHUB_REPO_NAME")
         self.auto_approve = os.getenv("RESOLUTION_AUTO_APPROVE", "false").lower() == "true"
         
+        # Service Bus configuration
+        self.servicebus_connection_string = os.getenv("AZURE_SERVICEBUS_CONNECTION_STRING")
+        self.input_queue_name = "diagnosis-to-resolution"
+        self.output_queue_name = "resolution-to-communication"
+        self.is_listening = False
+        
     async def resolve_incident(self, diagnosis):
         """Main resolution workflow"""
-        print(f"[Resolution Agent] 🔧 Starting resolution for {diagnosis['incident_id']}")
+        print(f"[Resolution Agent] [INFO] Starting resolution for {diagnosis['incident_id']}")
         
         try:
             # Step 1: Determine resolution strategy
@@ -50,18 +60,18 @@ class ResolutionAgent:
                 "status": "resolved" if immediate_result["success"] else "failed"
             }
             
-            print(f"[Resolution Agent] ✅ Resolution complete")
+            print(f"[Resolution Agent] [SUCCESS] Resolution complete")
             print(f"  Status: {resolution['status']}")
             if pr_result:
                 print(f"  PR Created: {pr_result['url']}")
             
-            # TODO: Send to Communication Agent
-            # await self.send_to_communication_agent(resolution)
+            # Send resolution to Communication Agent via Service Bus
+            await self.send_to_communication_agent(resolution)
             
             return resolution
             
         except Exception as e:
-            print(f"[Resolution Agent] ❌ Resolution failed: {e}")
+            print(f"[Resolution Agent] [ERROR] Resolution failed: {e}")
             return None
     
     async def determine_strategy(self, diagnosis):
@@ -261,21 +271,79 @@ class ResolutionAgent:
         except Exception as e:
             print(f"[Resolution Agent] Failed to create PR: {e}")
             return None
+    
+    async def start_listening(self):
+        """Start listening for diagnosis messages from diagnosis agent"""
+        if not self.servicebus_connection_string:
+            print("[Resolution Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
+            return
+        
+        self.is_listening = True
+        print(f"[Resolution Agent] [INFO] Starting to listen for messages on queue: {self.input_queue_name}")
+        
+        try:
+            async with AsyncServiceBusClient.from_connection_string(
+                self.servicebus_connection_string
+            ) as client:
+                async with client.get_queue_receiver(self.input_queue_name) as receiver:
+                    while self.is_listening:
+                        try:
+                            messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
+                            
+                            for message in messages:
+                                # Parse diagnosis data
+                                diagnosis_data = json.loads(str(message))
+                                print(f"[Resolution Agent] [INFO] Received diagnosis: {diagnosis_data['incident_id']}")
+                                
+                                # Process the diagnosis and resolve
+                                resolution = await self.resolve_incident(diagnosis_data)
+                                
+                                # Complete the message
+                                await receiver.complete_message(message)
+                                
+                        except asyncio.TimeoutError:
+                            continue
+                        except json.JSONDecodeError as e:
+                    print(f"[Resolution Agent] [ERROR] Failed to parse message: {e}")
+                            
+        except Exception as e:
+            print(f"[Resolution Agent] [ERROR] Error listening for messages: {e}")
+    
+    async def send_to_communication_agent(self, resolution):
+        """Send resolution results to communication agent via Service Bus queue"""
+        if not self.servicebus_connection_string:
+            print("[Resolution Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
+            return
+        
+        try:
+            async with AsyncServiceBusClient.from_connection_string(
+                self.servicebus_connection_string
+            ) as client:
+                async with client.get_queue_sender(self.output_queue_name) as sender:
+                    # Serialize resolution to JSON
+                    resolution_json = json.dumps(resolution)
+                    
+                    # Create and send message
+                    message = ServiceBusMessage(
+                        body=resolution_json,
+                        subject="resolution_complete",
+                        content_type="application/json"
+                    )
+                    
+                    await sender.send_messages(message)
+                    print(f"[Resolution Agent] [SUCCESS] Resolution {resolution['incident_id']} sent to communication agent")
+                    
+        except Exception as e:
+            print(f"[Resolution Agent] [ERROR] Failed to send resolution to communication agent: {e}")
 
 
 # Main execution for testing
 if __name__ == "__main__":
     agent = ResolutionAgent()
     
-    # Example diagnosis
-    test_diagnosis = {
-        "incident_id": "INC-20260213120000",
-        "root_cause": {
-            "type": "database_connection_exhaustion",
-            "description": "Database connection pool exhausted"
-        },
-        "impact": {"affected_services": ["API Gateway"]},
-        "confidence": 85
-    }
-    
-    asyncio.run(agent.resolve_incident(test_diagnosis))
+    # Option 1: Listen for messages from diagnosis agent
+    try:
+        asyncio.run(agent.start_listening())
+    except KeyboardInterrupt:
+        print("\n[Resolution Agent] Shutting down gracefully...")
+        agent.is_listening = False

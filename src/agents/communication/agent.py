@@ -10,14 +10,23 @@ This agent:
 """
 
 import os
+import json
 from datetime import datetime
 import asyncio
+from azure.identity import DefaultAzureCredential
+from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
+from azure.servicebus import ServiceBusMessage
 
 
 class CommunicationAgent:
     def __init__(self):
         self.teams_webhook = os.getenv("TEAMS_WEBHOOK_URL")
         self.slack_webhook = os.getenv("SLACK_WEBHOOK_URL")
+        
+        # Service Bus configuration
+        self.servicebus_connection_string = os.getenv("AZURE_SERVICEBUS_CONNECTION_STRING")
+        self.input_queue_name = "resolution-to-communication"
+        self.is_listening = False
         
     async def handle_incident_lifecycle(self, incident_data):
         """Handle communication throughout incident lifecycle"""
@@ -41,7 +50,8 @@ class CommunicationAgent:
     
     async def notify_detection(self, incident):
         """Send initial incident detection notification"""
-        print(f"[Communication Agent] 📢 Notifying detection: {incident['id']}")
+        incident_id = incident.get('incident_id') or incident.get('id', 'Unknown')
+        print(f"[Communication Agent] [INFO] Notifying detection: {incident_id}")
         
         message = self._format_detection_message(incident)
         
@@ -53,11 +63,12 @@ class CommunicationAgent:
         if self.slack_webhook:
             await self._send_slack_message(message)
         
-        print("[Communication Agent] ✅ Detection notification sent")
+        print(f"[Communication Agent] [SUCCESS] Detection notification sent")
     
     async def notify_diagnosis(self, diagnosis):
         """Send diagnosis update"""
-        print(f"[Communication Agent] 📢 Notifying diagnosis: {diagnosis['incident_id']}")
+        incident_id = diagnosis.get('incident_id') or diagnosis.get('id', 'Unknown')
+        print(f"[Communication Agent] [INFO] Notifying diagnosis: {incident_id}")
         
         message = self._format_diagnosis_message(diagnosis)
         
@@ -67,11 +78,12 @@ class CommunicationAgent:
         if self.slack_webhook:
             await self._send_slack_message(message)
         
-        print("[Communication Agent] ✅ Diagnosis notification sent")
+        print("[Communication Agent] [SUCCESS] Diagnosis notification sent")
     
     async def notify_resolution(self, resolution):
         """Send resolution notification"""
-        print(f"[Communication Agent] 📢 Notifying resolution: {resolution['incident_id']}")
+        incident_id = resolution.get('incident_id') or resolution.get('id', 'Unknown')
+        print(f"[Communication Agent] [INFO] Notifying resolution: {incident_id}")
         
         message = self._format_resolution_message(resolution)
         
@@ -81,20 +93,20 @@ class CommunicationAgent:
         if self.slack_webhook:
             await self._send_slack_message(message)
         
-        print("[Communication Agent] ✅ Resolution notification sent")
+        print("[Communication Agent] [SUCCESS] Resolution notification sent")
     
     async def generate_post_mortem(self, full_incident_data):
         """Generate comprehensive post-mortem report"""
-        print(f"[Communication Agent] 📝 Generating post-mortem")
+        print(f"[Communication Agent] [INFO] Generating post-mortem")
         
-        # TODO: Use Azure OpenAI to generate comprehensive post-mortem
+        incident_id = full_incident_data.get('incident_id') or full_incident_data.get('id', 'Unknown')
         # - Summarize timeline
         # - Analyze root cause
         # - Document lessons learned
         # - Create action items
         
         post_mortem = {
-            "incident_id": full_incident_data["incident_id"],
+            "incident_id": incident_id,
             "title": full_incident_data.get("diagnosis", {}).get("root_cause", {}).get("description", "Unknown issue"),
             "timeline": self._build_timeline(full_incident_data),
             "root_cause": full_incident_data.get("diagnosis", {}).get("root_cause", {}),
@@ -111,12 +123,13 @@ class CommunicationAgent:
         # Send post-mortem to stakeholders
         await self._send_post_mortem(post_mortem)
         
-        print("[Communication Agent] ✅ Post-mortem generated and distributed")
+        print("[Communication Agent] [SUCCESS] Post-mortem generated and distributed")
         return post_mortem
     
     async def escalate_to_oncall(self, incident):
         """Escalate to on-call engineer when automation fails"""
-        print(f"[Communication Agent] 🚨 Escalating to on-call: {incident['incident_id']}")
+        incident_id = incident.get('incident_id') or incident.get('id', 'Unknown')
+        print(f"[Communication Agent] [ERROR] Escalating to on-call: {incident_id}")
         
         # TODO: Implement PagerDuty/OpsGenie integration
         # - Create high-priority alert
@@ -124,9 +137,9 @@ class CommunicationAgent:
         # - Add runbook links
         
         escalation_message = f"""
-        🚨 ESCALATION REQUIRED 🚨
+        ESCALATION REQUIRED
         
-        Incident: {incident['incident_id']}
+        Incident: {incident_id}
         Automated resolution failed - manual intervention needed
         
         Details:
@@ -140,12 +153,13 @@ class CommunicationAgent:
         if self.teams_webhook:
             await self._send_teams_message({"text": escalation_message, "priority": "high"})
         
-        print("[Communication Agent] ✅ Escalation sent")
+        print("[Communication Agent] [SUCCESS] Escalation sent")
     
     def _format_detection_message(self, incident):
         """Format detection notification message"""
+        incident_id = incident.get('incident_id') or incident.get('id', 'Unknown')
         return {
-            "title": f"🚨 Incident Detected: {incident['id']}",
+            "title": f"[WARNING] Incident Detected: {incident_id}",
             "text": f"""
             New incident detected by Azure Incident Resolver
             
@@ -160,8 +174,9 @@ class CommunicationAgent:
     
     def _format_diagnosis_message(self, diagnosis):
         """Format diagnosis notification message"""
+        incident_id = diagnosis.get('incident_id') or diagnosis.get('id', 'Unknown')
         return {
-            "title": f"🔍 Diagnosis Complete: {diagnosis['incident_id']}",
+            "title": f"[INFO] Diagnosis Complete: {incident_id}",
             "text": f"""
             Root Cause Identified
             
@@ -176,11 +191,12 @@ class CommunicationAgent:
     
     def _format_resolution_message(self, resolution):
         """Format resolution notification message"""
+        incident_id = resolution.get('incident_id') or resolution.get('id', 'Unknown')
         status = resolution.get('status', 'unknown')
         color = "good" if status == "resolved" else "danger"
         
         return {
-            "title": f"✅ Resolution {'Complete' if status == 'resolved' else 'Failed'}: {resolution['incident_id']}",
+            "title": f"[SUCCESS] Resolution {'Complete' if status == 'resolved' else 'Failed'}: {incident_id}",
             "text": f"""
             Status: {status.upper()}
             
@@ -267,28 +283,63 @@ class CommunicationAgent:
         # TODO: Implement Slack webhook integration
         print(f"[Communication Agent] Sending Slack message: {message.get('title', 'Notification')}")
         await asyncio.sleep(0.5)  # Simulate API call
+    
+    async def start_listening(self):
+        """Start listening for resolution messages from resolution agent"""
+        if not self.servicebus_connection_string:
+            print("[Communication Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
+            return
+        
+        self.is_listening = True
+        print(f"[Communication Agent] [INFO] Starting to listen for messages on queue: {self.input_queue_name}")
+        
+        try:
+            async with AsyncServiceBusClient.from_connection_string(
+                self.servicebus_connection_string
+            ) as client:
+                async with client.get_queue_receiver(self.input_queue_name) as receiver:
+                    while self.is_listening:
+                        try:
+                            messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
+                            
+                            for message in messages:
+                                # Parse resolution data
+                                resolution_data = json.loads(str(message))
+                                print(f"[Communication Agent] [INFO] Received resolution: {resolution_data['incident_id']}")
+                                
+                                # Build full incident data for notification
+                                incident_data = {
+                                    "incident_id": resolution_data['incident_id'],
+                                    "resolution": resolution_data,
+                                    "phase": "resolved" if resolution_data.get('status') == "resolved" else "failed"
+                                }
+                                
+                                # Handle lifecycle notifications
+                                await self.handle_incident_lifecycle(incident_data)
+                                
+                                # Generate post-mortem if resolved
+                                if resolution_data.get('status') == "resolved":
+                                    await self.generate_post_mortem(incident_data)
+                                
+                                # Complete the message
+                                await receiver.complete_message(message)
+                                
+                        except asyncio.TimeoutError:
+                            continue
+                        except json.JSONDecodeError as e:
+                    print(f"[Communication Agent] [ERROR] Failed to parse message: {e}")
+                            
+        except Exception as e:
+            print(f"[Communication Agent] [ERROR] Error listening for messages: {e}")
 
 
 # Main execution for testing
 if __name__ == "__main__":
     agent = CommunicationAgent()
     
-    # Test incident data
-    test_incident = {
-        "incident_id": "INC-20260213120000",
-        "detected_at": "2026-02-13T12:00:00Z",
-        "diagnosis": {
-            "root_cause": {"description": "Database connection pool exhausted"},
-            "diagnosed_at": "2026-02-13T12:02:30Z",
-            "confidence": 85,
-            "impact": {"affected_services": ["API Gateway", "User Service"]}
-        },
-        "resolution": {
-            "resolved_at": "2026-02-13T12:05:00Z",
-            "status": "resolved",
-            "immediate_fix": {"action": "scaled_database"},
-            "pr_url": "https://github.com/example/repo/pull/123"
-        }
-    }
-    
-    asyncio.run(agent.generate_post_mortem(test_incident))
+    # Option 1: Listen for messages from resolution agent
+    try:
+        asyncio.run(agent.start_listening())
+    except KeyboardInterrupt:
+        print("\n[Communication Agent] Shutting down gracefully...")
+        agent.is_listening = False

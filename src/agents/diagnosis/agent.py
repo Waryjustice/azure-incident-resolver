@@ -10,7 +10,11 @@ This agent:
 """
 
 import os
+import json
 from datetime import datetime
+from azure.identity import DefaultAzureCredential
+from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
+from azure.servicebus import ServiceBusMessage
 import asyncio
 
 
@@ -20,9 +24,15 @@ class DiagnosisAgent:
         self.foundry_api_key = os.getenv("FOUNDRY_API_KEY")
         self.timeout = int(os.getenv("DIAGNOSIS_TIMEOUT_SECONDS", 300))
         
+        # Service Bus configuration
+        self.servicebus_connection_string = os.getenv("AZURE_SERVICEBUS_CONNECTION_STRING")
+        self.input_queue_name = "detection-to-diagnosis"
+        self.output_queue_name = "diagnosis-to-resolution"
+        self.is_listening = False
+        
     async def diagnose_incident(self, incident):
         """Main diagnosis workflow"""
-        print(f"[Diagnosis Agent] 🔍 Starting diagnosis for {incident['id']}")
+        print(f"[Diagnosis Agent] [INFO] Starting diagnosis for {incident['id']}")
         
         try:
             # Step 1: Gather additional context
@@ -52,17 +62,17 @@ class DiagnosisAgent:
                 "confidence": self._calculate_confidence(root_cause, similar_incidents)
             }
             
-            print(f"[Diagnosis Agent] ✅ Diagnosis complete")
+            print(f"[Diagnosis Agent] [SUCCESS] Diagnosis complete")
             print(f"  Root Cause: {root_cause['description']}")
             print(f"  Confidence: {diagnosis['confidence']}%")
             
-            # TODO: Send to Resolution Agent
-            # await self.send_to_resolution_agent(diagnosis)
+            # Send diagnosis to Resolution Agent via Service Bus
+            await self.send_to_resolution_agent(diagnosis)
             
             return diagnosis
             
         except Exception as e:
-            print(f"[Diagnosis Agent] ❌ Diagnosis failed: {e}")
+            print(f"[Diagnosis Agent] [ERROR] Diagnosis failed: {e}")
             return None
     
     async def gather_context(self, incident):
@@ -173,18 +183,79 @@ class DiagnosisAgent:
             base_confidence += 20
         
         return min(base_confidence, 95)
+    
+    async def start_listening(self):
+        """Start listening for incident messages from detection agent"""
+        if not self.servicebus_connection_string:
+            print("[Diagnosis Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
+            return
+        
+        self.is_listening = True
+        print(f"[Diagnosis Agent] [INFO] Starting to listen for messages on queue: {self.input_queue_name}")
+        
+        try:
+            async with AsyncServiceBusClient.from_connection_string(
+                self.servicebus_connection_string
+            ) as client:
+                async with client.get_queue_receiver(self.input_queue_name) as receiver:
+                    while self.is_listening:
+                        try:
+                            messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
+                            
+                            for message in messages:
+                                # Parse incident data
+                                incident_data = json.loads(str(message))
+                                print(f"[Diagnosis Agent] [INFO] Received incident: {incident_data['id']}")
+                                
+                                # Process the incident
+                                diagnosis = await self.diagnose_incident(incident_data)
+                                
+                                # Complete the message
+                                await receiver.complete_message(message)
+                                
+                        except asyncio.TimeoutError:
+                            continue
+                        except json.JSONDecodeError as e:
+                    print(f"[Diagnosis Agent] [ERROR] Failed to parse message: {e}")
+                            
+        except Exception as e:
+            print(f"[Diagnosis Agent] [ERROR] Error listening for messages: {e}")
+    
+    async def send_to_resolution_agent(self, diagnosis):
+        """Send diagnosis results to resolution agent via Service Bus queue"""
+        if not self.servicebus_connection_string:
+            print("[Diagnosis Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
+            return
+        
+        try:
+            async with AsyncServiceBusClient.from_connection_string(
+                self.servicebus_connection_string
+            ) as client:
+                async with client.get_queue_sender(self.output_queue_name) as sender:
+                    # Serialize diagnosis to JSON
+                    diagnosis_json = json.dumps(diagnosis)
+                    
+                    # Create and send message
+                    message = ServiceBusMessage(
+                        body=diagnosis_json,
+                        subject="diagnosis_complete",
+                        content_type="application/json"
+                    )
+                    
+                    await sender.send_messages(message)
+                    print(f"[Diagnosis Agent] [SUCCESS] Diagnosis {diagnosis['incident_id']} sent to resolution agent")
+                    
+        except Exception as e:
+            print(f"[Diagnosis Agent] [ERROR] Failed to send diagnosis to resolution agent: {e}")
 
 
 # Main execution for testing
 if __name__ == "__main__":
     agent = DiagnosisAgent()
     
-    # Example incident
-    test_incident = {
-        "id": "INC-20260213120000",
-        "resource": {"type": "Database", "id": "db-prod-001"},
-        "anomalies": [{"metric": "CONNECTION_COUNT", "value": 500}],
-        "severity": "high"
-    }
-    
-    asyncio.run(agent.diagnose_incident(test_incident))
+    # Option 1: Listen for messages from detection agent
+    try:
+        asyncio.run(agent.start_listening())
+    except KeyboardInterrupt:
+        print("\n[Diagnosis Agent] Shutting down gracefully...")
+        agent.is_listening = False
