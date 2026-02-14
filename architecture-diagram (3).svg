@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1400" height="1000" xmlns="http://www.w3.org/2000/svg">
+  <!-- Title -->
+  <text x="700" y="40" font-size="32" font-weight="bold" text-anchor="middle" fill="#333">Azure Incident Resolver - System Architecture</text>
+  
+  <!-- Azure Resources Layer -->
+  <rect x="50" y="80" width="1300" height="120" fill="#0078D4" opacity="0.1" stroke="#0078D4" stroke-width="2"/>
+  <text x="700" y="110" font-size="20" font-weight="bold" text-anchor="middle" fill="#0078D4">Azure Resources</text>
+  <rect x="100" y="130" width="150" height="50" fill="#0078D4" stroke="#005A9E" stroke-width="2" rx="5"/>
+  <text x="175" y="160" font-size="14" text-anchor="middle" fill="white">App Services</text>
+  <rect x="300" y="130" width="150" height="50" fill="#0078D4" stroke="#005A9E" stroke-width="2" rx="5"/>
+  <text x="375" y="160" font-size="14" text-anchor="middle" fill="white">SQL Database</text>
+  <rect x="500" y="130" width="150" height="50" fill="#0078D4" stroke="#005A9E" stroke-width="2" rx="5"/>
+  <text x="575" y="160" font-size="14" text-anchor="middle" fill="white">VMs</text>
+  <rect x="700" y="130" width="150" height="50" fill="#0078D4" stroke="#005A9E" stroke-width="2" rx="5"/>
+  <text x="775" y="160" font-size="14" text-anchor="middle" fill="white">AKS</text>
+  <rect x="900" y="130" width="200" height="50" fill="#0078D4" stroke="#005A9E" stroke-width="2" rx="5"/>
+  <text x="1000" y="160" font-size="14" text-anchor="middle" fill="white">Azure Functions</text>
+
+  <!-- Arrow down from Azure Resources -->
+  <line x1="700" y1="200" x2="700" y2="250" stroke="#666" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="720" y="230" font-size="12" fill="#666">Metrics and Logs</text>
+
+  <!-- Azure Monitor Layer -->
+  <rect x="200" y="250" width="1000" height="100" fill="#50E6FF" opacity="0.2" stroke="#50E6FF" stroke-width="2"/>
+  <rect x="300" y="270" width="300" height="60" fill="#50E6FF" stroke="#00B7C3" stroke-width="2" rx="5"/>
+  <text x="450" y="300" font-size="16" font-weight="bold" text-anchor="middle" fill="#005A9E">Azure Monitor</text>
+  <text x="450" y="320" font-size="12" text-anchor="middle" fill="#005A9E">Log Analytics Workspace</text>
+  <rect x="700" y="270" width="300" height="60" fill="#50E6FF" stroke="#00B7C3" stroke-width="2" rx="5"/>
+  <text x="850" y="300" font-size="16" font-weight="bold" text-anchor="middle" fill="#005A9E">Application Insights</text>
+  <text x="850" y="320" font-size="12" text-anchor="middle" fill="#005A9E">Telemetry and Tracing</text>
+
+  <!-- Arrow down to Detection Agent -->
+  <line x1="700" y1="350" x2="700" y2="400" stroke="#666" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="720" y="380" font-size="12" fill="#666">Event Stream</text>
+
+  <!-- Detection Agent -->
+  <rect x="550" y="400" width="300" height="100" fill="#7FBA00" stroke="#5E8C00" stroke-width="3" rx="8"/>
+  <text x="700" y="430" font-size="18" font-weight="bold" text-anchor="middle" fill="white">Detection Agent</text>
+  <text x="700" y="455" font-size="12" text-anchor="middle" fill="white">• Monitors Azure resources</text>
+  <text x="700" y="475" font-size="12" text-anchor="middle" fill="white">• AI anomaly detection</text>
+  <text x="700" y="495" font-size="12" text-anchor="middle" fill="white">• Triggers incident workflow</text>
+
+  <!-- Azure MCP Label -->
+  <rect x="1100" y="420" width="200" height="60" fill="#FFB900" opacity="0.2" stroke="#FFB900" stroke-width="2" rx="5"/>
+  <text x="1200" y="445" font-size="14" font-weight="bold" text-anchor="middle" fill="#D83B01">Azure MCP</text>
+  <text x="1200" y="465" font-size="11" text-anchor="middle" fill="#D83B01">(Service Bus Queues)</text>
+
+  <!-- Arrow to Diagnosis Agent -->
+  <line x1="700" y1="500" x2="700" y2="550" stroke="#D83B01" stroke-width="4" marker-end="url(#arrowhead-orange)" stroke-dasharray="5,5"/>
+  <text x="820" y="530" font-size="12" fill="#D83B01" font-weight="bold">detection-to-diagnosis</text>
+
+  <!-- Diagnosis Agent -->
+  <rect x="550" y="550" width="300" height="100" fill="#00A4EF" stroke="#0078D4" stroke-width="3" rx="8"/>
+  <text x="700" y="580" font-size="18" font-weight="bold" text-anchor="middle" fill="white">Diagnosis Agent</text>
+  <text x="700" y="605" font-size="12" text-anchor="middle" fill="white">• Analyzes logs and metrics</text>
+  <text x="700" y="625" font-size="12" text-anchor="middle" fill="white">• Identifies root cause (AI)</text>
+  <text x="700" y="645" font-size="12" text-anchor="middle" fill="white">• 80%+ confidence scoring</text>
+
+  <!-- Arrow to Resolution Agent -->
+  <line x1="700" y1="650" x2="700" y2="700" stroke="#D83B01" stroke-width="4" marker-end="url(#arrowhead-orange)" stroke-dasharray="5,5"/>
+  <text x="820" y="680" font-size="12" fill="#D83B01" font-weight="bold">diagnosis-to-resolution</text>
+
+  <!-- Resolution Agent -->
+  <rect x="550" y="700" width="300" height="120" fill="#F25022" stroke="#D83B01" stroke-width="3" rx="8"/>
+  <text x="700" y="730" font-size="18" font-weight="bold" text-anchor="middle" fill="white">Resolution Agent</text>
+  <text x="700" y="755" font-size="12" text-anchor="middle" fill="white">• Executes automated fixes</text>
+  <text x="700" y="775" font-size="12" text-anchor="middle" fill="white">• GitHub Copilot Agent Mode</text>
+  <text x="700" y="795" font-size="12" text-anchor="middle" fill="white">• Creates PRs automatically</text>
+
+  <!-- GitHub Integration -->
+  <rect x="900" y="730" width="180" height="60" fill="#333" stroke="#000" stroke-width="2" rx="5"/>
+  <text x="990" y="755" font-size="14" font-weight="bold" text-anchor="middle" fill="white">GitHub</text>
+  <text x="990" y="775" font-size="11" text-anchor="middle" fill="white">Copilot + PRs</text>
+  <line x1="850" y1="760" x2="900" y2="760" stroke="#333" stroke-width="3" marker-end="url(#arrowhead)"/>
+
+  <!-- Arrow to Communication Agent -->
+  <line x1="700" y1="820" x2="700" y2="870" stroke="#D83B01" stroke-width="4" marker-end="url(#arrowhead-orange)" stroke-dasharray="5,5"/>
+  <text x="850" y="850" font-size="12" fill="#D83B01" font-weight="bold">resolution-to-communication</text>
+
+  <!-- Communication Agent -->
+  <rect x="550" y="870" width="300" height="100" fill="#737373" stroke="#505050" stroke-width="3" rx="8"/>
+  <text x="700" y="900" font-size="18" font-weight="bold" text-anchor="middle" fill="white">Communication Agent</text>
+  <text x="700" y="925" font-size="12" text-anchor="middle" fill="white">• Teams notifications</text>
+  <text x="700" y="945" font-size="12" text-anchor="middle" fill="white">• Post-mortem generation</text>
+  <text x="700" y="965" font-size="12" text-anchor="middle" fill="white">• Incident knowledge base</text>
+
+  <!-- External Integrations -->
+  <rect x="100" y="895" width="120" height="50" fill="#5558AF" stroke="#444" stroke-width="2" rx="5"/>
+  <text x="160" y="925" font-size="13" text-anchor="middle" fill="white" font-weight="bold">MS Teams</text>
+  <line x1="220" y1="920" x2="550" y2="920" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <rect x="950" y="895" width="120" height="50" fill="#36C5F0" stroke="#444" stroke-width="2" rx="5"/>
+  <text x="1010" y="925" font-size="13" text-anchor="middle" fill="white" font-weight="bold">Slack</text>
+  <line x1="950" y1="920" x2="850" y2="920" stroke="#666" stroke-width="2" marker-start="url(#arrowhead)"/>
+
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#666"/>
+    </marker>
+    <marker id="arrowhead-orange" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#D83B01"/>
+    </marker>
+  </defs>
+
+  <!-- Legend -->
+  <rect x="50" y="870" width="180" height="110" fill="white" stroke="#333" stroke-width="2" rx="5"/>
+  <text x="140" y="895" font-size="14" font-weight="bold" text-anchor="middle" fill="#333">Legend</text>
+  <line x1="70" y1="910" x2="100" y2="910" stroke="#D83B01" stroke-width="4" stroke-dasharray="5,5"/>
+  <text x="110" y="915" font-size="11" fill="#333">Azure MCP</text>
+  <line x1="70" y1="930" x2="100" y2="930" stroke="#666" stroke-width="3"/>
+  <text x="110" y="935" font-size="11" fill="#333">Data Flow</text>
+  <rect x="70" y="945" width="25" height="20" fill="#7FBA00" stroke="#5E8C00" stroke-width="1"/>
+  <text x="110" y="960" font-size="11" fill="#333">AI Agent</text>
+
+  <!-- Tech Stack Labels -->
+  <text x="1200" y="550" font-size="12" fill="#666" font-style="italic">Python/Node.js</text>
+  <text x="1200" y="570" font-size="12" fill="#666" font-style="italic">Azure SDK</text>
+  <text x="1200" y="590" font-size="12" fill="#666" font-style="italic">Service Bus</text>
+  <text x="1200" y="610" font-size="12" fill="#666" font-style="italic">GitHub API</text>
+
+</svg>
