@@ -216,7 +216,7 @@ class DiagnosisAgent:
                         except asyncio.TimeoutError:
                             continue
                         except json.JSONDecodeError as e:
-                    print(f"[Diagnosis Agent] [ERROR] Failed to parse message: {e}")
+                            print(f"[Diagnosis Agent] [ERROR] Failed to parse message: {e}")
                             
         except Exception as e:
             print(f"[Diagnosis Agent] [ERROR] Error listening for messages: {e}")

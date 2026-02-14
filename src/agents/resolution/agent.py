@@ -287,41 +287,45 @@ Requirements:
         return context.strip()
     
     async def _call_copilot_suggest(self, context):
-        """Call gh copilot suggest command with diagnosis context"""
+        """Call gh copilot command with diagnosis context using stdin"""
         try:
-            # Create a temporary file for the context prompt
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(context)
-                temp_file = f.name
+            import logging
+            logger = logging.getLogger(__name__)
             
-            try:
-                # Call gh copilot suggest command
-                result = subprocess.run(
-                    ["gh", "copilot", "suggest", "-t", "shell", context],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                
-                if result.returncode == 0:
-                    return result.stdout.strip()
-                else:
-                    print(f"[Resolution Agent] Copilot suggest error: {result.stderr}")
-                    return None
-                    
-            finally:
-                # Clean up temporary file
-                if os.path.exists(temp_file):
-                    os.unlink(temp_file)
+            # Use stdin to avoid interactive prompt issue in subprocess
+            # Pass context via stdin ("-") instead of as command argument
+            # This prevents gh copilot from waiting for keyboard input
+            logger.debug(f"[Resolution Agent] Calling Copilot (context: {len(context)} bytes)")
+            
+            result = subprocess.run(
+                ["gh", "copilot", "-p", "-"],  # "-" means read prompt from stdin
+                input=context,                  # Pass prompt via stdin
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=60  # Increased from 30 to 60 seconds for slower networks
+            )
+            
+            if result.returncode == 0:
+                logger.info("[Resolution Agent] ✓ GitHub Copilot generated fix successfully")
+                return result.stdout.strip()
+            else:
+                logger.warning(f"[Resolution Agent] Copilot returned error code {result.returncode}")
+                logger.debug(f"Stderr: {result.stderr[:200] if result.stderr else 'None'}")
+                return None
                     
         except FileNotFoundError:
-            print("[Resolution Agent] ⚠️  'gh' command not found. Ensure GitHub CLI is installed.")
+            logger = logging.getLogger(__name__)
+            logger.error("[Resolution Agent] ⚠️  'gh' command not found. Ensure GitHub CLI is installed.")
             return None
         except subprocess.TimeoutExpired:
-            print("[Resolution Agent] ⚠️  GitHub Copilot suggest command timed out")
+            logger = logging.getLogger(__name__)
+            logger.warning("[Resolution Agent] ⚠️  GitHub Copilot suggest command timed out (60s)")
             return None
         except Exception as e:
-            print(f"[Resolution Agent] Error calling gh copilot suggest: {e}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"[Resolution Agent] Error calling gh copilot suggest: {e}", exc_info=True)
             return None
     
     def _parse_copilot_output(self, copilot_output, fix_type, diagnosis):

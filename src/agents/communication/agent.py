@@ -2,7 +2,7 @@
 Communication Agent - Handles stakeholder notifications and reporting
 
 This agent:
-- Sends real-time updates to stakeholders (Teams/Slack)
+- Sends real-time updates to stakeholders (Teams)
 - Generates incident reports and post-mortems
 - Creates timeline of incident events
 - Learns from incidents for future prevention
@@ -11,17 +11,26 @@ This agent:
 
 import os
 import json
+import logging
 from datetime import datetime
 import asyncio
+import aiohttp
 from azure.identity import DefaultAzureCredential
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
 from azure.servicebus import ServiceBusMessage
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(name)s] [%(levelname)s] %(asctime)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 class CommunicationAgent:
     def __init__(self):
         self.teams_webhook = os.getenv("TEAMS_WEBHOOK_URL")
-        self.slack_webhook = os.getenv("SLACK_WEBHOOK_URL")
         
         # Service Bus configuration
         self.servicebus_connection_string = os.getenv("AZURE_SERVICEBUS_CONNECTION_STRING")
@@ -51,7 +60,7 @@ class CommunicationAgent:
     async def notify_detection(self, incident):
         """Send initial incident detection notification"""
         incident_id = incident.get('incident_id') or incident.get('id', 'Unknown')
-        print(f"[Communication Agent] [INFO] Notifying detection: {incident_id}")
+        logger.info(f"[Communication Agent] Notifying detection: {incident_id}")
         
         message = self._format_detection_message(incident)
         
@@ -59,45 +68,35 @@ class CommunicationAgent:
         if self.teams_webhook:
             await self._send_teams_message(message)
         
-        # Send to Slack
-        if self.slack_webhook:
-            await self._send_slack_message(message)
-        
-        print(f"[Communication Agent] [SUCCESS] Detection notification sent")
+        logger.info("[Communication Agent] [SUCCESS] Detection notification sent")
     
     async def notify_diagnosis(self, diagnosis):
         """Send diagnosis update"""
         incident_id = diagnosis.get('incident_id') or diagnosis.get('id', 'Unknown')
-        print(f"[Communication Agent] [INFO] Notifying diagnosis: {incident_id}")
+        logger.info(f"[Communication Agent] Notifying diagnosis: {incident_id}")
         
         message = self._format_diagnosis_message(diagnosis)
         
         if self.teams_webhook:
             await self._send_teams_message(message)
         
-        if self.slack_webhook:
-            await self._send_slack_message(message)
-        
-        print("[Communication Agent] [SUCCESS] Diagnosis notification sent")
+        logger.info("[Communication Agent] [SUCCESS] Diagnosis notification sent")
     
     async def notify_resolution(self, resolution):
         """Send resolution notification"""
         incident_id = resolution.get('incident_id') or resolution.get('id', 'Unknown')
-        print(f"[Communication Agent] [INFO] Notifying resolution: {incident_id}")
+        logger.info(f"[Communication Agent] Notifying resolution: {incident_id}")
         
         message = self._format_resolution_message(resolution)
         
         if self.teams_webhook:
             await self._send_teams_message(message)
         
-        if self.slack_webhook:
-            await self._send_slack_message(message)
-        
-        print("[Communication Agent] [SUCCESS] Resolution notification sent")
+        logger.info("[Communication Agent] [SUCCESS] Resolution notification sent")
     
     async def generate_post_mortem(self, full_incident_data):
         """Generate comprehensive post-mortem report"""
-        print(f"[Communication Agent] [INFO] Generating post-mortem")
+        logger.info("[Communication Agent] Generating post-mortem")
         
         incident_id = full_incident_data.get('incident_id') or full_incident_data.get('id', 'Unknown')
         # - Summarize timeline
@@ -123,37 +122,43 @@ class CommunicationAgent:
         # Send post-mortem to stakeholders
         await self._send_post_mortem(post_mortem)
         
-        print("[Communication Agent] [SUCCESS] Post-mortem generated and distributed")
+        logger.info("[Communication Agent] [SUCCESS] Post-mortem generated and distributed")
         return post_mortem
     
     async def escalate_to_oncall(self, incident):
         """Escalate to on-call engineer when automation fails"""
         incident_id = incident.get('incident_id') or incident.get('id', 'Unknown')
-        print(f"[Communication Agent] [ERROR] Escalating to on-call: {incident_id}")
+        logger.error(f"[Communication Agent] Escalating to on-call: {incident_id}")
         
         # TODO: Implement PagerDuty/OpsGenie integration
         # - Create high-priority alert
         # - Include all incident context
         # - Add runbook links
         
-        escalation_message = f"""
-        ESCALATION REQUIRED
+        escalation_message = {
+            "title": f"🚨 ESCALATION REQUIRED: {incident_id}",
+            "text": f"""
+Automated resolution failed - manual intervention needed
+
+**Root Cause**: {incident.get('diagnosis', {}).get('root_cause', {}).get('description', 'Unknown')}
+
+**Impact**: {incident.get('diagnosis', {}).get('impact', {}).get('business_impact', 'Unknown')}
+
+**Attempted Actions**: {incident.get('resolution', {}).get('immediate_fix', {}).get('action', 'None')}
+
+**Status**: {incident.get('status', 'unknown').upper()}
+
+Please investigate immediately.
+            """,
+            "color": "danger",
+            "priority": "high"
+        }
         
-        Incident: {incident_id}
-        Automated resolution failed - manual intervention needed
-        
-        Details:
-        - Root Cause: {incident.get('diagnosis', {}).get('root_cause', {}).get('description', 'Unknown')}
-        - Impact: {incident.get('diagnosis', {}).get('impact', {}).get('business_impact', 'Unknown')}
-        - Automated Actions Attempted: {incident.get('resolution', {}).get('immediate_fix', {}).get('action', 'None')}
-        
-        Please investigate immediately.
-        """
-        
+        # Send escalation to Teams
         if self.teams_webhook:
-            await self._send_teams_message({"text": escalation_message, "priority": "high"})
+            await self._send_teams_message(escalation_message)
         
-        print("[Communication Agent] [SUCCESS] Escalation sent")
+        logger.info("[Communication Agent] [SUCCESS] Escalation sent")
     
     def _format_detection_message(self, incident):
         """Format detection notification message"""
@@ -265,33 +270,121 @@ class CommunicationAgent:
     async def _save_to_incident_database(self, post_mortem):
         """Save post-mortem to database for future RAG queries"""
         # TODO: Save to vector database for Microsoft Foundry
-        print(f"[Communication Agent] Saving to incident database: {post_mortem['incident_id']}")
+        logger.info(f"[Communication Agent] Saving to incident database: {post_mortem['incident_id']}")
     
     async def _send_post_mortem(self, post_mortem):
         """Send post-mortem to stakeholders"""
         # TODO: Format and send comprehensive post-mortem
-        print(f"[Communication Agent] Sending post-mortem: {post_mortem['incident_id']}")
+        logger.info(f"[Communication Agent] Sending post-mortem: {post_mortem['incident_id']}")
     
     async def _send_teams_message(self, message):
-        """Send message to Microsoft Teams"""
-        # TODO: Implement Teams webhook integration
-        print(f"[Communication Agent] Sending Teams message: {message.get('title', 'Notification')}")
-        await asyncio.sleep(0.5)  # Simulate API call
+        """Send properly formatted Teams Adaptive Card to webhook"""
+        
+        if not self.teams_webhook:
+            logger.warning("TEAMS_WEBHOOK_URL not configured - skipping Teams notification")
+            return False
+        
+        try:
+            # Build Teams Adaptive Card with proper formatting
+            card = self._build_teams_adaptive_card(message)
+            
+            # Send via HTTP POST
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.teams_webhook,
+                    json=card,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        logger.info(f"[Communication Agent] Teams message sent: {message.get('title', 'Notification')}")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"[Communication Agent] Failed to send Teams message: {response.status} - {error_text}")
+                        return False
+                        
+        except asyncio.TimeoutError:
+            logger.error("[Communication Agent] Teams webhook request timed out")
+            return False
+        except Exception as e:
+            logger.error(f"[Communication Agent] Error sending Teams message: {e}", exc_info=True)
+            return False
     
-    async def _send_slack_message(self, message):
-        """Send message to Slack"""
-        # TODO: Implement Slack webhook integration
-        print(f"[Communication Agent] Sending Slack message: {message.get('title', 'Notification')}")
-        await asyncio.sleep(0.5)  # Simulate API call
+    def _build_teams_adaptive_card(self, message):
+        """Build a properly formatted Teams Adaptive Card"""
+        
+        title = message.get('title', 'Incident Notification')
+        text = message.get('text', '')
+        color = message.get('color', 'accent')
+        priority = message.get('priority', 'normal')
+        
+        # Map color to theme color
+        theme_color_map = {
+            'danger': 'FF0000',      # Red
+            'warning': 'FF6600',      # Orange
+            'info': '0078D4',         # Blue
+            'good': '00CC00',         # Green
+            'accent': '0078D4'        # Default blue
+        }
+        
+        theme_color = theme_color_map.get(color, '0078D4')
+        
+        # Build adaptive card
+        card = {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [
+                {
+                    "type": "Container",
+                    "style": "emphasis",
+                    "items": [
+                        {
+                            "type": "ColumnSet",
+                            "columns": [
+                                {
+                                    "width": "stretch",
+                                    "items": [
+                                        {
+                                            "type": "TextBlock",
+                                            "text": title,
+                                            "weight": "bolder",
+                                            "size": "large",
+                                            "color": color if color != 'accent' else None
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "TextBlock",
+                    "text": text,
+                    "wrap": True,
+                    "spacing": "medium"
+                }
+            ],
+            "actions": [
+                {
+                    "type": "Action.OpenUrl",
+                    "title": "View in Dashboard",
+                    "url": f"{os.getenv('DASHBOARD_URL', 'http://localhost:8000')}/incidents"
+                }
+            ]
+        }
+        
+        return card
+    
     
     async def start_listening(self):
         """Start listening for resolution messages from resolution agent"""
         if not self.servicebus_connection_string:
-            print("[Communication Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
+            logger.warning("[Communication Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
             return
         
         self.is_listening = True
-        print(f"[Communication Agent] [INFO] Starting to listen for messages on queue: {self.input_queue_name}")
+        logger.info(f"[Communication Agent] Starting to listen for messages on queue: {self.input_queue_name}")
         
         try:
             async with AsyncServiceBusClient.from_connection_string(
@@ -305,7 +398,7 @@ class CommunicationAgent:
                             for message in messages:
                                 # Parse resolution data
                                 resolution_data = json.loads(str(message))
-                                print(f"[Communication Agent] [INFO] Received resolution: {resolution_data['incident_id']}")
+                                logger.info(f"[Communication Agent] Received resolution: {resolution_data['incident_id']}")
                                 
                                 # Build full incident data for notification
                                 incident_data = {
@@ -327,10 +420,10 @@ class CommunicationAgent:
                         except asyncio.TimeoutError:
                             continue
                         except json.JSONDecodeError as e:
-                    print(f"[Communication Agent] [ERROR] Failed to parse message: {e}")
+                            logger.error(f"[Communication Agent] Failed to parse message: {e}")
                             
         except Exception as e:
-            print(f"[Communication Agent] [ERROR] Error listening for messages: {e}")
+            logger.error(f"[Communication Agent] Error listening for messages: {e}", exc_info=True)
 
 
 # Main execution for testing
@@ -341,5 +434,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(agent.start_listening())
     except KeyboardInterrupt:
-        print("\n[Communication Agent] Shutting down gracefully...")
+        logger.info("[Communication Agent] Shutting down gracefully...")
         agent.is_listening = False
