@@ -13,6 +13,8 @@ import os
 import json
 from datetime import datetime
 import asyncio
+import subprocess
+import tempfile
 from github import Github
 from azure.identity import DefaultAzureCredential
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
@@ -189,17 +191,12 @@ class ResolutionAgent:
         """Generate permanent fix using GitHub Copilot Agent Mode"""
         permanent_action = strategy.get("permanent")
         
-        # TODO: Integrate with GitHub Copilot Agent Mode
-        # - Analyze codebase
-        # - Generate fix code
-        # - Run tests
-        
         if permanent_action == "implement_connection_pooling":
-            fix_code = self._generate_connection_pooling_fix(diagnosis)
+            fix_code = await self.generate_fix_with_copilot(diagnosis, "connection_pooling")
         elif permanent_action == "fix_memory_leak_code":
-            fix_code = self._generate_memory_leak_fix(diagnosis)
+            fix_code = await self.generate_fix_with_copilot(diagnosis, "memory_leak")
         elif permanent_action == "implement_backoff_retry":
-            fix_code = self._generate_backoff_retry_fix(diagnosis)
+            fix_code = await self.generate_fix_with_copilot(diagnosis, "backoff_retry")
         else:
             fix_code = None
         
@@ -246,31 +243,239 @@ class ResolutionAgent:
             "changes": []
         }
     
+    async def generate_fix_with_copilot(self, diagnosis, fix_type):
+        """Generate fix code using GitHub Copilot suggest command"""
+        try:
+            # Prepare context for Copilot based on diagnosis and fix type
+            context = self._prepare_copilot_context(diagnosis, fix_type)
+            
+            print(f"[Resolution Agent] Requesting fix from GitHub Copilot for {fix_type}...")
+            
+            # Call gh copilot suggest with the diagnosis context
+            copilot_output = await self._call_copilot_suggest(context)
+            
+            if not copilot_output:
+                print("[Resolution Agent] Copilot suggest returned no output, using fallback")
+                return self._generate_fallback_fix(fix_type, diagnosis)
+            
+            # Parse and structure the generated code
+            fix_code = self._parse_copilot_output(copilot_output, fix_type, diagnosis)
+            
+            print(f"[Resolution Agent] Successfully generated fix with GitHub Copilot")
+            return fix_code
+            
+        except Exception as e:
+            print(f"[Resolution Agent] Error generating fix with Copilot: {e}")
+            return self._generate_fallback_fix(fix_type, diagnosis)
+    
+    def _prepare_copilot_context(self, diagnosis, fix_type):
+        """Prepare context information for Copilot"""
+        root_cause = diagnosis.get("root_cause", {})
+        context = f"""
+Incident ID: {diagnosis.get('incident_id')}
+Root Cause: {root_cause.get('type')}
+Description: {root_cause.get('description')}
+Affected Component: {diagnosis.get('affected_component')}
+
+Task: Generate a code fix for {fix_type}
+Requirements:
+- Implement proper error handling
+- Include comments
+- Follow best practices
+- Ensure backward compatibility
+"""
+        return context.strip()
+    
+    async def _call_copilot_suggest(self, context):
+        """Call gh copilot suggest command with diagnosis context"""
+        try:
+            # Create a temporary file for the context prompt
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(context)
+                temp_file = f.name
+            
+            try:
+                # Call gh copilot suggest command
+                result = subprocess.run(
+                    ["gh", "copilot", "suggest", "-t", "shell", context],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                else:
+                    print(f"[Resolution Agent] Copilot suggest error: {result.stderr}")
+                    return None
+                    
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+                    
+        except FileNotFoundError:
+            print("[Resolution Agent] ⚠️  'gh' command not found. Ensure GitHub CLI is installed.")
+            return None
+        except subprocess.TimeoutExpired:
+            print("[Resolution Agent] ⚠️  GitHub Copilot suggest command timed out")
+            return None
+        except Exception as e:
+            print(f"[Resolution Agent] Error calling gh copilot suggest: {e}")
+            return None
+    
+    def _parse_copilot_output(self, copilot_output, fix_type, diagnosis):
+        """Parse and structure Copilot-generated code"""
+        files_to_modify = self._get_files_for_fix_type(fix_type)
+        
+        return {
+            "files": files_to_modify,
+            "changes": [
+                {
+                    "file": files_to_modify[0] if files_to_modify else "src/fix.js",
+                    "diff": copilot_output,
+                    "suggested_by": "github_copilot",
+                    "fix_type": fix_type
+                }
+            ]
+        }
+    
+    def _get_files_for_fix_type(self, fix_type):
+        """Get file paths for specific fix type"""
+        file_mapping = {
+            "connection_pooling": ["src/database/connection.js", "src/database/pool.js"],
+            "memory_leak": ["src/services/cache.js", "src/memory/manager.js"],
+            "backoff_retry": ["src/services/api-client.js", "src/utils/retry.js"]
+        }
+        return file_mapping.get(fix_type, ["src/fix.js"])
+    
+    def _generate_fallback_fix(self, fix_type, diagnosis):
+        """Generate fallback fix when Copilot is unavailable"""
+        if fix_type == "connection_pooling":
+            return self._generate_connection_pooling_fix(diagnosis)
+        elif fix_type == "memory_leak":
+            return self._generate_memory_leak_fix(diagnosis)
+        elif fix_type == "backoff_retry":
+            return self._generate_backoff_retry_fix(diagnosis)
+        else:
+            return None
+
+    
     async def create_fix_pr(self, diagnosis, permanent_fix):
         """Create GitHub PR with permanent fix"""
         if not self.github_client or not permanent_fix["code_changes"]:
             return None
         
         try:
-            # TODO: Implement actual GitHub PR creation
-            # - Create branch
-            # - Commit changes
-            # - Create PR
-            # - Add labels and reviewers
+            repo = self.github_client.get_repo(f"{self.repo_owner}/{self.repo_name}")
+            branch_name = f"fix/{diagnosis['incident_id'].lower()}"
             
-            print("[Resolution Agent] Creating GitHub PR...")
+            print("[Resolution Agent] Creating GitHub PR with Copilot-suggested fix...")
             
-            pr_url = f"https://github.com/{self.repo_owner}/{self.repo_name}/pull/123"
+            # Get the base branch (usually 'main' or 'master')
+            base_branch = repo.default_branch
+            base = repo.get_branch(base_branch)
+            
+            # Create new branch from base
+            try:
+                # Try to get existing branch
+                repo.get_branch(branch_name)
+                print(f"[Resolution Agent] Branch {branch_name} already exists")
+            except:
+                # Create new branch if it doesn't exist
+                repo.create_git_ref(
+                    ref=f"refs/heads/{branch_name}",
+                    sha=base.commit.sha
+                )
+                print(f"[Resolution Agent] Created branch {branch_name}")
+            
+            # Get fix details
+            code_changes = permanent_fix["code_changes"]["changes"]
+            fix_type = code_changes[0].get("fix_type", "automated") if code_changes else "automated"
+            
+            # Create commit message
+            root_cause = diagnosis.get("root_cause", {})
+            commit_message = f"Fix: {root_cause.get('description', 'Automated incident resolution')}\n\nIncident ID: {diagnosis['incident_id']}\nFix Type: {fix_type}\nGenerated by GitHub Copilot"
+            
+            # Commit changes to the new branch
+            for change in code_changes:
+                file_path = change.get("file", "src/fix.js")
+                diff_content = change.get("diff", "")
+                
+                # Get or create file
+                try:
+                    existing_file = repo.get_contents(file_path, ref=branch_name)
+                    # Update existing file
+                    repo.update_file(
+                        path=file_path,
+                        message=commit_message,
+                        content=diff_content,
+                        sha=existing_file.sha,
+                        branch=branch_name
+                    )
+                except:
+                    # Create new file
+                    repo.create_file(
+                        path=file_path,
+                        message=commit_message,
+                        content=diff_content,
+                        branch=branch_name
+                    )
+            
+            # Create PR
+            pr = repo.create_pull(
+                title=f"[Incident Resolution] Fix: {root_cause.get('description', 'Automated resolution')}",
+                body=self._generate_pr_description(diagnosis, permanent_fix),
+                head=branch_name,
+                base=base_branch
+            )
+            
+            # Add labels
+            pr.add_to_labels("incident-resolution", "automated", fix_type)
+            
+            print(f"[Resolution Agent] [SUCCESS] PR created: {pr.html_url}")
             
             return {
-                "url": pr_url,
-                "branch": f"fix/{diagnosis['incident_id'].lower()}",
-                "title": f"Fix: {diagnosis['root_cause']['description']}"
+                "url": pr.html_url,
+                "branch": branch_name,
+                "title": pr.title,
+                "number": pr.number,
+                "suggested_by": "github_copilot"
             }
             
         except Exception as e:
             print(f"[Resolution Agent] Failed to create PR: {e}")
             return None
+    
+    def _generate_pr_description(self, diagnosis, permanent_fix):
+        """Generate PR description with incident details"""
+        root_cause = diagnosis.get("root_cause", {})
+        code_changes = permanent_fix["code_changes"]
+        
+        description = f"""## Automated Incident Resolution
+
+**Incident ID:** {diagnosis['incident_id']}
+
+### Root Cause
+- **Type:** {root_cause.get('type', 'Unknown')}
+- **Description:** {root_cause.get('description', 'N/A')}
+- **Severity:** {diagnosis.get('severity', 'Unknown')}
+
+### Affected Component
+{diagnosis.get('affected_component', 'N/A')}
+
+### Fix Details
+- **Action:** {permanent_fix.get('action', 'N/A')}
+- **Files Modified:** {', '.join(code_changes.get('files', []))}
+- **Generated by:** GitHub Copilot
+
+### Changes
+{code_changes.get('changes')[0].get('diff', 'See code changes') if code_changes.get('changes') else 'N/A'}
+
+---
+*This PR was automatically generated by the Azure Incident Resolver using GitHub Copilot.*
+"""
+        return description
     
     async def start_listening(self):
         """Start listening for diagnosis messages from diagnosis agent"""
@@ -304,7 +509,7 @@ class ResolutionAgent:
                         except asyncio.TimeoutError:
                             continue
                         except json.JSONDecodeError as e:
-                    print(f"[Resolution Agent] [ERROR] Failed to parse message: {e}")
+                            print(f"[Resolution Agent] [ERROR] Failed to parse message: {e}")
                             
         except Exception as e:
             print(f"[Resolution Agent] [ERROR] Error listening for messages: {e}")
