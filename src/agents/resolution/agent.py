@@ -5,12 +5,13 @@ This agent:
 - Receives diagnosis from Diagnosis Agent
 - Determines appropriate resolution strategy
 - Executes automated fixes (scaling, restarts, config changes)
-- Uses GitHub Copilot Agent Mode to generate code fixes
+- Uses GitHub Copilot Agent Mode to generate code fixes based on runtime context
 - Creates PRs for permanent solutions
 """
 
 import os
 import json
+import re
 from datetime import datetime
 import asyncio
 import subprocess
@@ -191,14 +192,10 @@ class ResolutionAgent:
         """Generate permanent fix using GitHub Copilot Agent Mode"""
         permanent_action = strategy.get("permanent")
         
-        if permanent_action == "implement_connection_pooling":
-            fix_code = await self.generate_fix_with_copilot(diagnosis, "connection_pooling")
-        elif permanent_action == "fix_memory_leak_code":
-            fix_code = await self.generate_fix_with_copilot(diagnosis, "memory_leak")
-        elif permanent_action == "implement_backoff_retry":
-            fix_code = await self.generate_fix_with_copilot(diagnosis, "backoff_retry")
-        else:
-            fix_code = None
+        # Build runtime context from diagnosis
+        runtime_data = self._extract_runtime_data(diagnosis)
+        
+        fix_code = await self.generate_fix_with_copilot(diagnosis, runtime_data)
         
         return {
             "action": permanent_action,
@@ -243,33 +240,128 @@ class ResolutionAgent:
             "changes": []
         }
     
-    async def generate_fix_with_copilot(self, diagnosis, fix_type):
-        """Generate fix code using GitHub Copilot suggest command"""
+    def _extract_runtime_data(self, diagnosis):
+        """Extract runtime context data from diagnosis"""
         try:
-            # Prepare context for Copilot based on diagnosis and fix type
-            context = self._prepare_copilot_context(diagnosis, fix_type)
+            root_cause = diagnosis.get("root_cause", {})
+            return {
+                "error_message": root_cause.get("description", ""),
+                "stack_trace": diagnosis.get("stack_trace", ""),
+                "logs_excerpt": diagnosis.get("logs_excerpt", ""),
+                "metrics_snapshot": diagnosis.get("metrics_snapshot", {}),
+                "suspected_file": diagnosis.get("affected_component", ""),
+                "relevant_code_snippet": diagnosis.get("code_snippet", "")
+            }
+        except Exception as e:
+            print(f"[Resolution Agent] Error extracting runtime data: {e}")
+            return None
+    
+    def _prepare_runtime_context(self, diagnosis, runtime_data):
+        """Prepare real-time incident-driven context for Copilot"""
+        if not runtime_data:
+            return None
+        
+        try:
+            # Validate required fields
+            required_fields = [
+                "error_message", "stack_trace", "logs_excerpt",
+                "metrics_snapshot", "suspected_file", "relevant_code_snippet"
+            ]
             
-            print(f"[Resolution Agent] Requesting fix from GitHub Copilot for {fix_type}...")
+            for field in required_fields:
+                if field not in runtime_data:
+                    print(f"[Resolution Agent] Missing runtime data field: {field}")
+                    return None
             
-            # Call gh copilot suggest with the diagnosis context
+            # Mask sensitive data
+            masked_data = self._mask_sensitive_data(runtime_data)
+            
+            # Build context from runtime evidence
+            root_cause = diagnosis.get("root_cause", {})
+            context = f"""
+Incident ID: {diagnosis.get('incident_id')}
+Root Cause Type: {root_cause.get('type', 'unknown')}
+Root Cause Description: {root_cause.get('description', 'N/A')}
+Affected Component: {diagnosis.get('affected_component')}
+
+Runtime Evidence:
+- Error Message: {masked_data['error_message'][:500]}
+- Stack Trace: {masked_data['stack_trace'][:500]}
+- Recent Logs: {masked_data['logs_excerpt'][:500]}
+- Performance Metrics: {str(masked_data['metrics_snapshot'])[:500]}
+- Suspected File: {masked_data['suspected_file']}
+
+Code Context:
+{masked_data['relevant_code_snippet'][:1000]}
+
+Task: Generate a code fix based on the above runtime evidence.
+Requirements:
+- Address the root cause identified above
+- Include proper error handling
+- Add logging for debugging
+- Follow best practices
+- Ensure backward compatibility
+- Add unit tests where applicable
+"""
+            return context.strip()
+        
+        except Exception as e:
+            print(f"[Resolution Agent] Error preparing runtime context: {e}")
+            return None
+    
+    def _mask_sensitive_data(self, runtime_data):
+        """Mask sensitive information in runtime data"""
+        import re
+        masked = runtime_data.copy()
+        
+        # Mask API keys, passwords, tokens
+        patterns = [
+            r'(["\']?(?:api_key|password|token|secret)["\']?\s*[:=]\s*)[^,\s}]*',
+            r'((?:https?://)?(?:.*@)?)[^/]+@',  # Email addresses
+            r'\b\d{3}-\d{2}-\d{4}\b',  # SSN
+            r'\b\d{16}\b',  # Credit card
+        ]
+        
+        for field in ['error_message', 'stack_trace', 'logs_excerpt']:
+            if field in masked:
+                text = masked[field]
+                for pattern in patterns:
+                    text = re.sub(pattern, r'\1***MASKED***', text, flags=re.IGNORECASE)
+                masked[field] = text
+        
+        return masked
+    
+    async def generate_fix_with_copilot(self, diagnosis, runtime_data):
+        """Generate fix code using GitHub Copilot suggest command with runtime context"""
+        try:
+            # Prepare context from runtime data instead of fix_type
+            context = self._prepare_runtime_context(diagnosis, runtime_data)
+            
+            if not context:
+                print("[Resolution Agent] Failed to prepare runtime context, falling back")
+                return self._generate_fallback_from_diagnosis(diagnosis)
+            
+            print(f"[Resolution Agent] Requesting fix from GitHub Copilot using runtime context...")
+            
+            # Call gh copilot suggest with the runtime context
             copilot_output = await self._call_copilot_suggest(context)
             
             if not copilot_output:
                 print("[Resolution Agent] Copilot suggest returned no output, using fallback")
-                return self._generate_fallback_fix(fix_type, diagnosis)
+                return self._generate_fallback_from_diagnosis(diagnosis)
             
             # Parse and structure the generated code
-            fix_code = self._parse_copilot_output(copilot_output, fix_type, diagnosis)
+            fix_code = self._parse_copilot_output_runtime(copilot_output, diagnosis, runtime_data)
             
             print(f"[Resolution Agent] Successfully generated fix with GitHub Copilot")
             return fix_code
             
         except Exception as e:
             print(f"[Resolution Agent] Error generating fix with Copilot: {e}")
-            return self._generate_fallback_fix(fix_type, diagnosis)
+            return self._generate_fallback_from_diagnosis(diagnosis)
     
     def _prepare_copilot_context(self, diagnosis, fix_type):
-        """Prepare context information for Copilot"""
+        """DEPRECATED: Use _prepare_runtime_context instead"""
         root_cause = diagnosis.get("root_cause", {})
         context = f"""
 Incident ID: {diagnosis.get('incident_id')}
@@ -286,7 +378,122 @@ Requirements:
 """
         return context.strip()
     
-    async def _call_copilot_suggest(self, context):
+    def _parse_copilot_output(self, copilot_output, fix_type, diagnosis):
+        """DEPRECATED: Use _parse_copilot_output_runtime instead"""
+        files_to_modify = self._get_files_for_fix_type(fix_type)
+        
+        return {
+            "files": files_to_modify,
+            "changes": [
+                {
+                    "file": files_to_modify[0] if files_to_modify else "src/fix.js",
+                    "diff": copilot_output,
+                    "suggested_by": "github_copilot",
+                    "fix_type": fix_type
+                }
+            ]
+        }
+    
+    def _parse_copilot_output_runtime(self, copilot_output, diagnosis, runtime_data):
+        """Parse Copilot output using runtime context"""
+        try:
+            suspected_file = runtime_data.get("suspected_file", "")
+            files_to_modify = [suspected_file] if suspected_file else ["src/fix.js"]
+            
+            return {
+                "files": files_to_modify,
+                "changes": [
+                    {
+                        "file": files_to_modify[0],
+                        "diff": copilot_output,
+                        "suggested_by": "github_copilot",
+                        "root_cause_type": diagnosis.get("root_cause", {}).get("type", "unknown")
+                    }
+                ]
+            }
+        except Exception as e:
+            print(f"[Resolution Agent] Error parsing Copilot output: {e}")
+            return None
+    
+    def _get_files_for_fix_type(self, fix_type):
+        """Get file paths for specific fix type"""
+        file_mapping = {
+            "connection_pooling": ["src/database/connection.js", "src/database/pool.js"],
+            "memory_leak": ["src/services/cache.js", "src/memory/manager.js"],
+            "backoff_retry": ["src/services/api-client.js", "src/utils/retry.js"]
+        }
+        return file_mapping.get(fix_type, ["src/fix.js"])
+    
+    def _generate_fallback_fix(self, fix_type, diagnosis):
+        """DEPRECATED: Use _generate_fallback_from_diagnosis instead"""
+        if fix_type == "connection_pooling":
+            return self._generate_connection_pooling_fix(diagnosis)
+        elif fix_type == "memory_leak":
+            return self._generate_memory_leak_fix(diagnosis)
+        elif fix_type == "backoff_retry":
+            return self._generate_backoff_retry_fix(diagnosis)
+        else:
+            return None
+    
+    def _generate_fallback_from_diagnosis(self, diagnosis):
+        """Generate fallback fix based on root cause from diagnosis"""
+        try:
+            root_cause_type = diagnosis.get("root_cause", {}).get("type", "")
+            
+            # Map root cause type to fallback fix
+            fallback_mapping = {
+                "database_connection_exhaustion": self._generate_connection_pooling_fix,
+                "memory_leak": self._generate_memory_leak_fix,
+                "rate_limit_breach": self._generate_backoff_retry_fix,
+            }
+            
+            fallback_fn = fallback_mapping.get(root_cause_type)
+            if fallback_fn:
+                return fallback_fn(diagnosis)
+            
+            return None
+        except Exception as e:
+            print(f"[Resolution Agent] Error generating fallback: {e}")
+            return None
+    
+    def _parse_copilot_output(self, copilot_output, fix_type, diagnosis):
+        """DEPRECATED: Use _parse_copilot_output_runtime instead"""
+        files_to_modify = self._get_files_for_fix_type(fix_type)
+        
+        return {
+            "files": files_to_modify,
+            "changes": [
+                {
+                    "file": files_to_modify[0] if files_to_modify else "src/fix.js",
+                    "diff": copilot_output,
+                    "suggested_by": "github_copilot",
+                    "fix_type": fix_type
+                }
+            ]
+        }
+    
+    def _get_files_for_fix_type(self, fix_type):
+        """Get file paths for specific fix type"""
+        file_mapping = {
+            "connection_pooling": ["src/database/connection.js", "src/database/pool.js"],
+            "memory_leak": ["src/services/cache.js", "src/memory/manager.js"],
+            "backoff_retry": ["src/services/api-client.js", "src/utils/retry.js"]
+        }
+        return file_mapping.get(fix_type, ["src/fix.js"])
+    
+    def _generate_fallback_fix(self, fix_type, diagnosis):
+        """DEPRECATED: Use _generate_fallback_from_diagnosis instead"""
+        if fix_type == "connection_pooling":
+            return self._generate_connection_pooling_fix(diagnosis)
+        elif fix_type == "memory_leak":
+            return self._generate_memory_leak_fix(diagnosis)
+        elif fix_type == "backoff_retry":
+            return self._generate_backoff_retry_fix(diagnosis)
+        else:
+            return None
+
+    
+    async def create_fix_pr(self, diagnosis, permanent_fix):
         """Call gh copilot command with diagnosis context using stdin"""
         try:
             import logging

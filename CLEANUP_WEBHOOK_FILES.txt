@@ -1,0 +1,29 @@
+# Cleanup: Remove These Files
+
+Delete these files manually since they were created for the webhook feature:
+
+```
+test_teams_webhook.py
+test_servicebus_integration.py
+start_with_teams.py
+TEAMS_WEBHOOK_README.md
+TEAMS_WEBHOOK_QUICKSTART.md
+TEAMS_WEBHOOK_CHECKLIST.md
+TEAMS_WEBHOOK_FIX_SUMMARY.md
+docs/TEAMS_WEBHOOK_SETUP.md
+```
+
+Or run in PowerShell:
+```powershell
+cd C:\Users\shaur\Downloads\azure-incident-resolver
+Remove-Item test_teams_webhook.py, test_servicebus_integration.py, start_with_teams.py, `
+  TEAMS_WEBHOOK_README.md, TEAMS_WEBHOOK_QUICKSTART.md, TEAMS_WEBHOOK_CHECKLIST.md, `
+  TEAMS_WEBHOOK_FIX_SUMMARY.md, docs\TEAMS_WEBHOOK_SETUP.md -Force
+```
+
+Or from Git bash:
+```bash
+rm test_teams_webhook.py test_servicebus_integration.py start_with_teams.py \
+   TEAMS_WEBHOOK_README.md TEAMS_WEBHOOK_QUICKSTART.md TEAMS_WEBHOOK_CHECKLIST.md \
+   TEAMS_WEBHOOK_FIX_SUMMARY.md docs/TEAMS_WEBHOOK_SETUP.md
+```
