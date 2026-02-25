@@ -29,7 +29,17 @@ class ResolutionAgent:
         self.repo_owner = os.getenv("GITHUB_REPO_OWNER")
         self.repo_name = os.getenv("GITHUB_REPO_NAME")
         self.auto_approve = os.getenv("RESOLUTION_AUTO_APPROVE", "false").lower() == "true"
-        
+
+        # Azure credentials and resource configuration
+        self.credential = DefaultAzureCredential()
+        self.subscription_id = os.getenv("AZURE_SUBSCRIPTION_ID")
+        self.resource_group = os.getenv("AZURE_RESOURCE_GROUP")
+        # Parse webapp name from MONITORED_WEBAPP_ID (last path segment) or explicit env var
+        monitored_id = os.getenv("MONITORED_WEBAPP_ID", "")
+        self.webapp_name = os.getenv("AZURE_WEBAPP_NAME") or (monitored_id.split("/")[-1] if monitored_id else None)
+        self.sql_server = os.getenv("AZURE_SQL_SERVER")
+        self.sql_database = os.getenv("AZURE_SQL_DATABASE")
+
         # Service Bus configuration
         self.servicebus_connection_string = os.getenv("AZURE_SERVICEBUS_CONNECTION_STRING")
         self.input_queue_name = "diagnosis-to-resolution"
@@ -131,62 +141,175 @@ class ResolutionAgent:
             return {"success": False, "error": str(e)}
     
     async def _scale_database(self, diagnosis):
-        """Scale database tier"""
-        # TODO: Implement Azure Database scaling
-        # - Get current tier
-        # - Scale to higher tier
-        # - Monitor scaling progress
-        
-        print("[Resolution Agent] Scaling database tier...")
-        await asyncio.sleep(2)  # Simulate scaling
-        
-        return {
-            "success": True,
-            "action": "scaled_database",
-            "details": "Scaled from S1 to S3"
-        }
+        """Scale Azure SQL Database to a higher tier using Azure Management SDK"""
+        from azure.mgmt.sql import SqlManagementClient
+        from azure.mgmt.sql.models import Sku
+
+        affected = diagnosis.get("affected_resource", {})
+        sql_server = self.sql_server or affected.get("sql_server")
+        sql_database = self.sql_database or affected.get("sql_database")
+
+        if not all([self.subscription_id, self.resource_group, sql_server, sql_database]):
+            return {"success": False, "message": "Missing config: set AZURE_SQL_SERVER and AZURE_SQL_DATABASE env vars"}
+
+        try:
+            client = SqlManagementClient(self.credential, self.subscription_id)
+            loop = asyncio.get_event_loop()
+
+            # Get current database to read existing SKU and location
+            db = await loop.run_in_executor(
+                None, lambda: client.databases.get(self.resource_group, sql_server, sql_database)
+            )
+            current_sku = db.sku.name if db.sku else "S1"
+            print(f"[Resolution Agent] Current SQL SKU: {current_sku}, scaling up...")
+
+            # Scale up one tier
+            scale_map = {"Basic": "S2", "S0": "S2", "S1": "S3", "S2": "S3", "S3": "S4", "S4": "P1"}
+            target_sku = scale_map.get(current_sku, "S3")
+
+            poller = await loop.run_in_executor(
+                None,
+                lambda: client.databases.begin_create_or_update(
+                    self.resource_group, sql_server, sql_database,
+                    {"location": db.location, "sku": Sku(name=target_sku)}
+                )
+            )
+            await loop.run_in_executor(None, poller.result)
+
+            print(f"[Resolution Agent] Database scaled: {current_sku} → {target_sku}")
+            return {
+                "success": True,
+                "action": "scaled_database",
+                "details": f"Scaled from {current_sku} to {target_sku}",
+                "resource": f"{sql_server}/{sql_database}"
+            }
+        except Exception as e:
+            print(f"[Resolution Agent] Database scaling failed: {e}")
+            return {"success": False, "error": str(e)}
     
     async def _restart_service(self, diagnosis):
-        """Restart affected service"""
-        # TODO: Implement service restart
-        # - Identify pods/instances
-        # - Perform rolling restart
-        # - Verify health
-        
-        print("[Resolution Agent] Restarting service...")
-        await asyncio.sleep(2)  # Simulate restart
-        
-        return {
-            "success": True,
-            "action": "restarted_service",
-            "details": "Restarted 3 pods"
-        }
+        """Restart Azure App Service using Azure Management SDK"""
+        from azure.mgmt.web import WebSiteManagementClient
+
+        affected = diagnosis.get("affected_resource", {})
+        webapp_name = self.webapp_name or affected.get("webapp_name")
+
+        if not all([self.subscription_id, self.resource_group, webapp_name]):
+            return {"success": False, "message": "Missing config: set AZURE_WEBAPP_NAME or MONITORED_WEBAPP_ID env vars"}
+
+        try:
+            client = WebSiteManagementClient(self.credential, self.subscription_id)
+            loop = asyncio.get_event_loop()
+
+            print(f"[Resolution Agent] Restarting App Service: {webapp_name}...")
+            await loop.run_in_executor(
+                None, lambda: client.web_apps.restart(self.resource_group, webapp_name)
+            )
+
+            print(f"[Resolution Agent] App Service {webapp_name} restarted successfully")
+            return {
+                "success": True,
+                "action": "restarted_service",
+                "details": f"Restarted App Service: {webapp_name}",
+                "resource": webapp_name
+            }
+        except Exception as e:
+            print(f"[Resolution Agent] Service restart failed: {e}")
+            return {"success": False, "error": str(e)}
     
     async def _enable_circuit_breaker(self, diagnosis):
-        """Enable circuit breaker"""
-        # TODO: Implement circuit breaker activation
-        
-        print("[Resolution Agent] Enabling circuit breaker...")
-        await asyncio.sleep(1)
-        
-        return {
-            "success": True,
-            "action": "enabled_circuit_breaker",
-            "details": "Circuit breaker activated for API gateway"
-        }
+        """Enable circuit breaker by updating Azure App Service application settings"""
+        from azure.mgmt.web import WebSiteManagementClient
+        from azure.mgmt.web.models import StringDictionary
+
+        affected = diagnosis.get("affected_resource", {})
+        webapp_name = self.webapp_name or affected.get("webapp_name")
+
+        if not all([self.subscription_id, self.resource_group, webapp_name]):
+            return {"success": False, "message": "Missing config: set AZURE_WEBAPP_NAME or MONITORED_WEBAPP_ID env vars"}
+
+        try:
+            client = WebSiteManagementClient(self.credential, self.subscription_id)
+            loop = asyncio.get_event_loop()
+
+            # Read current app settings and add circuit breaker flags
+            current = await loop.run_in_executor(
+                None, lambda: client.web_apps.list_application_settings(self.resource_group, webapp_name)
+            )
+            settings = dict(current.properties or {})
+            settings["CIRCUIT_BREAKER_ENABLED"] = "true"
+            settings["CIRCUIT_BREAKER_THRESHOLD"] = "5"
+            settings["CIRCUIT_BREAKER_TIMEOUT_SECONDS"] = "60"
+
+            await loop.run_in_executor(
+                None,
+                lambda: client.web_apps.update_application_settings(
+                    self.resource_group, webapp_name, StringDictionary(properties=settings)
+                )
+            )
+
+            print(f"[Resolution Agent] Circuit breaker enabled on {webapp_name}")
+            return {
+                "success": True,
+                "action": "enabled_circuit_breaker",
+                "details": f"Circuit breaker activated on App Service: {webapp_name} (threshold=5, timeout=60s)",
+                "resource": webapp_name
+            }
+        except Exception as e:
+            print(f"[Resolution Agent] Circuit breaker activation failed: {e}")
+            return {"success": False, "error": str(e)}
     
     async def _rollback_deployment(self, diagnosis):
-        """Rollback recent deployment"""
-        # TODO: Implement deployment rollback via GitHub Actions or Azure DevOps
-        
-        print("[Resolution Agent] Rolling back deployment...")
-        await asyncio.sleep(2)
-        
-        return {
-            "success": True,
-            "action": "rolled_back_deployment",
-            "details": "Rolled back to previous stable version"
-        }
+        """Rollback deployment via Azure App Service slot swap or restart"""
+        from azure.mgmt.web import WebSiteManagementClient
+        from azure.mgmt.web.models import CsmSlotEntity
+
+        affected = diagnosis.get("affected_resource", {})
+        webapp_name = self.webapp_name or affected.get("webapp_name")
+
+        if not all([self.subscription_id, self.resource_group, webapp_name]):
+            return {"success": False, "message": "Missing config: set AZURE_WEBAPP_NAME or MONITORED_WEBAPP_ID env vars"}
+
+        try:
+            client = WebSiteManagementClient(self.credential, self.subscription_id)
+            loop = asyncio.get_event_loop()
+
+            # Check for deployment slots
+            slots = await loop.run_in_executor(
+                None, lambda: list(client.web_apps.list_slots(self.resource_group, webapp_name))
+            )
+            slot_names = [s.name for s in slots]
+
+            if "staging" in slot_names:
+                # Swap staging ↔ production to roll back to previous stable version
+                print(f"[Resolution Agent] Swapping production ↔ staging slot for {webapp_name}...")
+                poller = await loop.run_in_executor(
+                    None,
+                    lambda: client.web_apps.begin_swap_slot_with_production(
+                        self.resource_group, webapp_name,
+                        CsmSlotEntity(target_slot="staging", preserve_vnet=True)
+                    )
+                )
+                await loop.run_in_executor(None, poller.result)
+                details = f"Swapped production ↔ staging slot for {webapp_name}"
+            else:
+                # No staging slot — restart the app to recover from bad state
+                print(f"[Resolution Agent] No staging slot found; restarting {webapp_name}...")
+                await loop.run_in_executor(
+                    None, lambda: client.web_apps.restart(self.resource_group, webapp_name)
+                )
+                details = f"No staging slot available; restarted {webapp_name} to recover"
+
+            print(f"[Resolution Agent] Rollback complete: {details}")
+            return {
+                "success": True,
+                "action": "rolled_back_deployment",
+                "details": details,
+                "resource": webapp_name
+            }
+        except Exception as e:
+            print(f"[Resolution Agent] Rollback failed: {e}")
+            return {"success": False, "error": str(e)}
     
     async def generate_permanent_fix(self, diagnosis, strategy):
         """Generate permanent fix using GitHub Copilot Agent Mode"""

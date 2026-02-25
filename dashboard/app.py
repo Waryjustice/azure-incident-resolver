@@ -23,11 +23,12 @@ agent_status = {
     'communication': {'status': 'idle', 'last_check': None, 'notifications_sent': 0}
 }
 metrics = {
-    'avg_mttr': 300,
+    'avg_mttr': 0,
     'incidents_this_week': 0,
     'resolution_rate': 85,
     'false_positive_rate': 5
 }
+_resolved_count = 0  # track resolved count for proper MTTR averaging
 
 
 @app.route('/')
@@ -270,89 +271,252 @@ def trigger_demo_incident(scenario_type):
         })
         
         def simulate_workflow():
+            global _resolved_count
             try:
                 duration = scenario['duration']
-                
+
+                # Per-scenario detection/diagnosis/resolution messages
+                scenario_details = {
+                    'database-spike': {
+                        'detection': [
+                            'Database connection pool at 98% — 847 active connections (limit: 100)',
+                            'API latency spiking to 8500ms, request queue backing up',
+                        ],
+                        'diagnosis': [
+                            'Root cause: Unclosed connections in request handler causing pool exhaustion',
+                            'Evidence: 412 leaked connections over last 15 minutes, 0 connections being released',
+                        ],
+                        'resolution': [
+                            'Scaling database from S1 → S3 tier via Azure SQL Management SDK...',
+                            'Generating connection pool fix via GitHub Copilot Agent Mode...',
+                            '✓ Database scaled: S1 → S3 (300% capacity increase)',
+                            '✓ PR created: Connection pool with proper cleanup handlers — pull/1247',
+                        ],
+                        'post_mortem': 'Root cause: missing connection.close() in exception paths. Fix: context manager pattern applied.',
+                    },
+                    'memory-leak': {
+                        'detection': [
+                            'Service memory at 95% (7.6GB / 8GB), growing 200MB/min',
+                            'OOM kill predicted in ~2 minutes on prod-api-service-03',
+                        ],
+                        'diagnosis': [
+                            'Root cause: Unbounded in-memory session cache missing TTL and maxsize',
+                            'Evidence: SessionManager cache contains 2.1M entries, never evicted',
+                        ],
+                        'resolution': [
+                            'Restarting App Service to recover memory via Azure Web Management SDK...',
+                            'Generating LRU cache fix via GitHub Copilot Agent Mode...',
+                            '✓ Service restarted, memory restored to 22% (1.8GB)',
+                            '✓ PR created: LRU cache with TTL=3600s and maxsize=10000 — pull/1251',
+                        ],
+                        'post_mortem': 'Root cause: session cache unbounded growth. Fix: cachetools LRU with eviction policy.',
+                    },
+                    'rate-limit': {
+                        'detection': [
+                            'Payment API returning HTTP 429 — 42% of requests failing',
+                            'Third-party rate limit: 1000 req/min quota, current burst 3200 req/min',
+                        ],
+                        'diagnosis': [
+                            'Root cause: No rate limiter or backoff logic on outgoing payment API calls',
+                            'Evidence: 12,400 failed payment requests in last 10 minutes',
+                        ],
+                        'resolution': [
+                            'Enabling circuit breaker via Azure App Service config SDK...',
+                            'Generating exponential backoff retry logic via GitHub Copilot Agent Mode...',
+                            '✓ Circuit breaker enabled — non-critical requests queued',
+                            '✓ PR created: Exponential backoff with jitter, max 3 retries — pull/1309',
+                        ],
+                        'post_mortem': 'Root cause: missing backoff on 3rd-party API. Fix: tenacity retry with exponential backoff.',
+                    },
+                    'failed-deployment': {
+                        'detection': [
+                            'Deployment v2.4.1 causing 15% error rate — 25,000 failed requests',
+                            'HTTP 500 errors spiked immediately after deploy at 14:32 UTC',
+                        ],
+                        'diagnosis': [
+                            'Root cause: Breaking database schema change in v2.4.1 — column renamed without migration',
+                            'Evidence: "column user_name does not exist" in 100% of error stack traces',
+                        ],
+                        'resolution': [
+                            'Initiating slot swap rollback to v2.4.0 via Azure Web Management SDK...',
+                            'Generating migration fix via GitHub Copilot Agent Mode...',
+                            '✓ Rolled back to v2.4.0 — error rate restored to 0.1%',
+                            '✓ PR created: Backwards-compatible migration with column alias — pull/1388',
+                        ],
+                        'post_mortem': 'Root cause: breaking schema change deployed without backward compatibility. Fix: dual-write migration pattern.',
+                    },
+                    'disk-space': {
+                        'detection': [
+                            'Disk usage at 95% on prod-disk-001 — only 2GB remaining',
+                            'Log files consuming 450GB — rotation policy not configured',
+                        ],
+                        'diagnosis': [
+                            'Root cause: Application logs never rotated, accumulating since last deploy',
+                            'Evidence: /var/log/app/access.log is 312GB (single file, uncompressed)',
+                        ],
+                        'resolution': [
+                            'Purging log files older than 7 days via Azure CLI...',
+                            'Generating logrotate config via GitHub Copilot Agent Mode...',
+                            '✓ Purged 430GB — disk usage restored to 18%',
+                            '✓ PR created: logrotate with daily rotation, 7-day retention, gzip — pull/1412',
+                        ],
+                        'post_mortem': 'Root cause: no log rotation policy. Fix: logrotate config applied, alerting at 80% disk.',
+                    },
+                    'ssl-expiring': {
+                        'detection': [
+                            'SSL certificate expires in 5 days for api.prod.azureincidents.com',
+                            'Certificate issued 2025-02-23, expires 2026-02-28 — 5 days remaining',
+                        ],
+                        'diagnosis': [
+                            'Root cause: Certificate auto-renewal not configured — manual renewal was missed',
+                            'Evidence: ACME renewal cron job disabled after server migration in December',
+                        ],
+                        'resolution': [
+                            'Triggering emergency certificate renewal via Azure Key Vault API...',
+                            'Generating auto-renewal automation via GitHub Copilot Agent Mode...',
+                            '✓ New certificate issued — valid for 90 days',
+                            '✓ PR created: ACME auto-renewal script with 30-day pre-expiry check — pull/1455',
+                        ],
+                        'post_mortem': 'Root cause: renewal automation disabled after migration. Fix: ACME cron restored with monitoring.',
+                    },
+                    'cpu-spike': {
+                        'detection': [
+                            'CPU at 98% on aks-prod-api — response times 8500ms, 15K users affected',
+                            'Pod CPU throttling at 100% for 8 of 8 running pods',
+                        ],
+                        'diagnosis': [
+                            'Root cause: N+1 query pattern in /api/users endpoint — 1 query per user row',
+                            'Evidence: 847 sequential DB queries per API request traced via App Insights',
+                        ],
+                        'resolution': [
+                            'Scaling AKS pods from 3 → 9 via Azure Container SDK...',
+                            'Generating optimized batch query via GitHub Copilot Agent Mode...',
+                            '✓ Pods scaled to 9 — CPU dropped to 34%, latency restored to 180ms',
+                            '✓ PR created: Batch query with JOIN replaces N+1 pattern — pull/1489',
+                        ],
+                        'post_mortem': 'Root cause: N+1 query in users endpoint. Fix: single batched JOIN query, response time -97%.',
+                    },
+                    'database-deadlock': {
+                        'detection': [
+                            '42 database transactions deadlocked on db-prod-payment — payment processing halted',
+                            'Deadlock wait timeout after 30s — transactions rolling back',
+                        ],
+                        'diagnosis': [
+                            'Root cause: Circular lock dependency — Order and Payment tables locked in opposite order',
+                            'Evidence: Thread A holds Order lock waiting for Payment; Thread B holds Payment waiting for Order',
+                        ],
+                        'resolution': [
+                            'Killing deadlocked transactions via Azure SQL Management SDK...',
+                            'Generating consistent lock ordering fix via GitHub Copilot Agent Mode...',
+                            '✓ 42 deadlocked transactions cleared — payment processing resumed',
+                            '✓ PR created: Consistent alphabetical table lock ordering — pull/1521',
+                        ],
+                        'post_mortem': 'Root cause: inconsistent lock ordering in payment flow. Fix: alphabetical lock acquisition order enforced.',
+                    },
+                    'cache-down': {
+                        'detection': [
+                            'Redis cache unavailable — 100% cache miss rate, API latency 3500ms',
+                            '12K users experiencing degraded performance on prod-api',
+                        ],
+                        'diagnosis': [
+                            'Root cause: Redis instance OOM-killed — maxmemory-policy set to noeviction',
+                            'Evidence: Redis memory at 100% (8GB/8GB), OOM killer log entry at 02:14 UTC',
+                        ],
+                        'resolution': [
+                            'Restarting Redis with updated maxmemory-policy via Azure Cache SDK...',
+                            'Generating cache fallback logic via GitHub Copilot Agent Mode...',
+                            '✓ Redis restarted with allkeys-lru policy — latency restored to 145ms',
+                            '✓ PR created: Graceful cache fallback to DB on miss — pull/1558',
+                        ],
+                        'post_mortem': 'Root cause: noeviction policy caused OOM. Fix: allkeys-lru policy + cache-aside fallback pattern.',
+                    },
+                    'slow-query': {
+                        'detection': [
+                            'Query execution time 35s on db-prod-analytics (baseline: 0.8s)',
+                            'Affecting /api/reports endpoint — 100% of requests timing out',
+                        ],
+                        'diagnosis': [
+                            'Root cause: Missing index on user_id column in 50M row transactions table',
+                            'Evidence: EXPLAIN ANALYZE shows full sequential scan (cost=0..4812847)',
+                        ],
+                        'resolution': [
+                            'Creating index CONCURRENTLY on transactions.user_id via Azure SQL SDK...',
+                            'Generating query optimization via GitHub Copilot Agent Mode...',
+                            '✓ Index created — query time restored to 0.9s (97% improvement)',
+                            '✓ PR created: Composite index + query rewrite with covering index — pull/1601',
+                        ],
+                        'post_mortem': 'Root cause: missing index on high-cardinality column. Fix: composite index, query planner forced to use it.',
+                    },
+                    'new-feature-bug': {
+                        'detection': [
+                            '⚠️  NOTE: New feature deployment — rollback NOT available (no previous slot)',
+                            'User Dashboard v2.0 causing NullPointerException — 25K failed requests',
+                        ],
+                        'diagnosis': [
+                            'Root cause: NullPointerException in UserProfileComponent.js line 42 — missing null guard',
+                            'Issue: userData.firstName accessed before null check on userData object',
+                        ],
+                        'resolution': [
+                            '⚠️  Rollback not possible — generating code fix via GitHub Copilot Agent Mode...',
+                            'Fix: const displayName = userData?.firstName ? `${userData.firstName} ${userData.lastName}` : "User Profile"',
+                            '✓ Copilot fix generated with 96% code quality score',
+                            '✓ PR created: Null-safe optional chaining throughout UserProfileComponent — pull/2847',
+                            'Running 847 automated tests...',
+                            '✓ All tests passed — 98.2% code coverage maintained',
+                        ],
+                        'post_mortem': 'Root cause: missing null guard on new user object shape. Fix: optional chaining + default fallback applied.',
+                    },
+                }
+
+                messages = scenario_details.get(scenario_type, scenario_details['database-spike'])
+
                 # Detection phase
-                add_log('Detection', f'Starting real-time anomaly detection for {scenario["affected_resource"]}...')
+                add_log('Detection', f'Scanning resource: {scenario["affected_resource"]}...')
                 update_agent_status('detection', 'working')
                 time.sleep(1)
-                add_log('Detection', f'✓ Detected {scenario["title"]}')
+                add_log('Detection', f'✓ Anomaly confirmed: {scenario["title"]}')
                 add_log('Detection', f'Severity: {scenario["severity"].upper()} | Resource: {scenario["affected_resource"]}')
-                
-                # Special handling for new feature bug scenario
-                is_new_feature_bug = scenario_type == 'new-feature-bug'
-                if is_new_feature_bug:
-                    add_log('Detection', '⚠️  NOTE: New feature deployment - rollback NOT available')
-                
+                for detail in messages['detection']:
+                    add_log('Detection', detail)
                 update_agent_status('detection', 'idle', {'incidents_detected': agent_status['detection']['incidents_detected'] + 1})
                 update_incident_status(incident['id'], 'diagnosing', int(duration * 0.15))
-                
+
                 # Diagnosis phase
-                add_log('Diagnosis', 'Starting root cause analysis...')
-                add_log('Diagnosis', 'Correlating logs and metrics across 12 systems...')
+                add_log('Diagnosis', 'Starting root cause analysis — correlating logs and metrics across systems...')
                 update_agent_status('diagnosis', 'working')
                 time.sleep(2)
                 add_log('Diagnosis', '✓ Root cause identified with 87% confidence')
-                
-                if is_new_feature_bug:
-                    add_log('Diagnosis', 'Root cause: NullPointerException in UserProfileComponent.js line 42')
-                    add_log('Diagnosis', 'Issue: Missing null check before accessing userData.firstName')
-                else:
-                    add_log('Diagnosis', 'Probable cause: Connection pool exhaustion due to leak in connection manager')
-                
+                for detail in messages['diagnosis']:
+                    add_log('Diagnosis', detail)
                 update_agent_status('diagnosis', 'idle', {'analyses_completed': agent_status['diagnosis']['analyses_completed'] + 1})
                 update_incident_status(incident['id'], 'resolving', int(duration * 0.4))
-                
+
                 # Resolution phase
-                add_log('Resolution', 'Requesting fix from GitHub Copilot Agent Mode...')
-                
-                if is_new_feature_bug:
-                    add_log('Resolution', '⚠️  Rollback NOT available (new feature v2.0 has no previous version)')
-                    add_log('Resolution', 'Generating null-safe code fix via GitHub Copilot...')
-                    time.sleep(1)
-                    add_log('Resolution', '✓ Copilot generated null safety fix with 96% code quality')
-                    add_log('Resolution', 'Generated: const displayName = (userData && userData.firstName) ? userData.firstName + \' \' + userData.lastName : \'User Profile\';')
-                    add_log('Resolution', 'Creating automated PR for UserProfileComponent.js...')
-                    time.sleep(1)
-                    add_log('Resolution', '✓ PR created: https://github.com/azure-incident-resolver/pull/2847')
-                    add_log('Resolution', 'Running 847 automated tests...')
-                    add_log('Resolution', '✓ All tests passed - 98.2% code coverage maintained')
-                    add_log('Resolution', 'Deploying fix to production...')
-                else:
-                    add_log('Resolution', 'Generating code for connection pooling optimization...')
-                    time.sleep(2)
-                    add_log('Resolution', '✓ Copilot generated fix with 92% code quality')
-                    add_log('Resolution', 'PR created: https://github.com/azure-incident-resolver/pull/1247')
-                    add_log('Resolution', 'Auto-scaling database from S1 → S3 tier...')
-                    add_log('Resolution', '✓ Database scaled successfully')
-                
                 update_agent_status('resolution', 'working')
-                time.sleep(2)
+                for detail in messages['resolution']:
+                    add_log('Resolution', detail)
+                    time.sleep(0.5)
                 update_agent_status('resolution', 'idle', {'issues_resolved': agent_status['resolution']['issues_resolved'] + 1})
                 update_incident_status(incident['id'], 'communicating', int(duration * 0.7))
-                
+
                 # Communication phase
-                add_log('Communication', 'Sending Teams notification to General channel...')
+                add_log('Communication', 'Sending Microsoft Teams notification...')
                 update_agent_status('communication', 'working')
                 time.sleep(1)
-                add_log('Communication', '✓ Teams notification sent to General channel')
-                add_log('Communication', 'Generating post-mortem report...')
-                
-                if is_new_feature_bug:
-                    add_log('Communication', '✓ Resolution: Copilot-generated code fix deployed')
-                    add_log('Communication', '✓ User Dashboard v2.0 now has null safety checks')
-                else:
-                    add_log('Communication', '✓ Post-mortem available at https://kb.internal/incidents/INC-2026-0451')
-                add_log('Communication', f'✓ Incident resolved in {duration} seconds | 89% reduction vs manual MTTR')
+                add_log('Communication', '✓ Teams notification sent to #incidents channel')
+                add_log('Communication', f'Post-mortem: {messages["post_mortem"]}')
+                add_log('Communication', f'✓ Incident resolved in {duration}s | ~89% faster than manual MTTR (~{duration * 9}s)')
                 update_agent_status('communication', 'idle', {'notifications_sent': agent_status['communication']['notifications_sent'] + 1})
                 update_incident_status(incident['id'], 'resolved', duration)
-                
-                # Update metrics
-                new_avg = int((metrics['avg_mttr'] + duration) / 2)
+
+                # Update metrics with proper running average
+                _resolved_count += 1
+                current_avg = metrics['avg_mttr']
+                new_avg = int(current_avg + (duration - current_avg) / _resolved_count)
                 update_metrics({
                     'incidents_this_week': metrics['incidents_this_week'] + 1,
-                    'avg_mttr': new_avg
+                    'avg_mttr': new_avg,
+                    'resolution_rate': min(99, int(85 + (_resolved_count * 0.5))),
                 })
             except Exception as e:
                 print(f"Error in workflow simulation: {str(e)}")

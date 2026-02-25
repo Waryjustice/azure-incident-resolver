@@ -7,32 +7,31 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
-        .status-idle { @apply bg-gray-100 text-gray-700; }
-        .status-working { @apply bg-blue-100 text-blue-700 animate-pulse; }
-        .status-error { @apply bg-red-100 text-red-700; }
-        .severity-critical { @apply bg-red-100 border-l-4 border-red-500; }
-        .severity-high { @apply bg-orange-100 border-l-4 border-orange-500; }
-        .severity-medium { @apply bg-yellow-100 border-l-4 border-yellow-500; }
-        .severity-low { @apply bg-green-100 border-l-4 border-green-500; }
-        .incident-status-detecting { @apply text-blue-600; }
-        .incident-status-diagnosing { @apply text-purple-600; }
-        .incident-status-resolving { @apply text-orange-600; }
-        .incident-status-communicating { @apply text-indigo-600; }
-        .incident-status-resolved { @apply text-green-600; }
+        #terminal::-webkit-scrollbar { width: 6px; }
+        #terminal::-webkit-scrollbar-track { background: #111; }
+        #terminal::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100">
     <div class="min-h-screen">
         <!-- Header -->
         <header class="bg-gradient-to-r from-blue-900 to-blue-800 shadow-lg">
-            <div class="max-w-7xl mx-auto px-6 py-8">
-                <div class="flex justify-between items-center">
+            <div class="max-w-7xl mx-auto px-6 py-6">
+                <div class="flex justify-between items-start">
                     <div>
                         <h1 class="text-4xl font-bold text-white">Azure Incident Resolver</h1>
-                        <p class="text-blue-200 mt-2">Real-time Incident Detection & Resolution Dashboard</p>
+                        <p class="text-blue-200 mt-1">Real-time Multi-Agent Incident Detection &amp; Resolution</p>
+                        <div class="flex flex-wrap gap-2 mt-3">
+                            <span class="bg-blue-700 bg-opacity-60 text-blue-100 text-xs px-2 py-1 rounded-full">⚡ Azure AI Foundry</span>
+                            <span class="bg-gray-700 bg-opacity-60 text-gray-100 text-xs px-2 py-1 rounded-full">🤖 GitHub Copilot</span>
+                            <span class="bg-blue-800 bg-opacity-60 text-blue-100 text-xs px-2 py-1 rounded-full">🔗 Azure MCP</span>
+                            <span class="bg-green-800 bg-opacity-60 text-green-100 text-xs px-2 py-1 rounded-full">☁️ Azure SDK</span>
+                            <span class="bg-purple-800 bg-opacity-60 text-purple-100 text-xs px-2 py-1 rounded-full">🏆 MS AI Dev Days 2026</span>
+                        </div>
                     </div>
-                    <div class="text-right">
-                        <div class="text-lg" id="connection-status">
+                    <div class="text-right flex flex-col items-end gap-2">
+                        <div class="text-2xl font-mono text-blue-200" id="live-clock">--:--:--</div>
+                        <div class="text-sm" id="connection-status">
                             <span class="inline-block w-3 h-3 bg-red-500 rounded-full mr-2"></span>
                             <span id="connection-text">Connecting...</span>
                         </div>
@@ -46,7 +45,9 @@
             <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 <div class="bg-gray-800 rounded-lg shadow p-6 border-l-4 border-green-500">
                     <p class="text-gray-400 text-sm uppercase tracking-wide">Avg MTTR</p>
-                    <p class="text-3xl font-bold text-green-400 mt-2"><span id="metric-mttr">300</span>s</p>
+                    <p class="text-3xl font-bold text-green-400 mt-2">
+                        <span id="metric-mttr">--</span><span id="metric-mttr-unit" class="text-lg ml-1 hidden">s</span>
+                    </p>
                     <p class="text-gray-500 text-xs mt-2">Mean time to resolution</p>
                 </div>
                 <div class="bg-gray-800 rounded-lg shadow p-6 border-l-4 border-blue-500">
@@ -71,41 +72,45 @@
                 <h2 class="text-2xl font-bold text-white mb-6">Agent Status</h2>
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div class="agent-card bg-gray-700 rounded-lg p-4" data-agent="detection">
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="font-semibold text-white">Detection</h3>
-                            <span class="status-idle px-3 py-1 rounded text-xs font-medium">Idle</span>
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-semibold text-white">🔍 Detection</h3>
+                            <span class="bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs font-medium">Idle</span>
                         </div>
-                        <div class="text-2xl font-bold text-blue-400 mb-2">0</div>
+                        <p class="text-gray-500 text-xs mb-3">Monitors Azure resources for anomalies</p>
+                        <div class="text-2xl font-bold text-blue-400 mb-1">0</div>
                         <p class="text-gray-400 text-sm">Incidents detected</p>
                         <p class="text-gray-500 text-xs mt-3">Last check: <span class="last-check">--:--:--</span></p>
                     </div>
 
                     <div class="agent-card bg-gray-700 rounded-lg p-4" data-agent="diagnosis">
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="font-semibold text-white">Diagnosis</h3>
-                            <span class="status-idle px-3 py-1 rounded text-xs font-medium">Idle</span>
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-semibold text-white">🧠 Diagnosis</h3>
+                            <span class="bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs font-medium">Idle</span>
                         </div>
-                        <div class="text-2xl font-bold text-purple-400 mb-2">0</div>
+                        <p class="text-gray-500 text-xs mb-3">AI-powered root cause analysis</p>
+                        <div class="text-2xl font-bold text-purple-400 mb-1">0</div>
                         <p class="text-gray-400 text-sm">Analyses completed</p>
                         <p class="text-gray-500 text-xs mt-3">Last check: <span class="last-check">--:--:--</span></p>
                     </div>
 
                     <div class="agent-card bg-gray-700 rounded-lg p-4" data-agent="resolution">
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="font-semibold text-white">Resolution</h3>
-                            <span class="status-idle px-3 py-1 rounded text-xs font-medium">Idle</span>
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-semibold text-white">🔧 Resolution</h3>
+                            <span class="bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs font-medium">Idle</span>
                         </div>
-                        <div class="text-2xl font-bold text-orange-400 mb-2">0</div>
+                        <p class="text-gray-500 text-xs mb-3">Executes automated fixes &amp; Copilot PRs</p>
+                        <div class="text-2xl font-bold text-orange-400 mb-1">0</div>
                         <p class="text-gray-400 text-sm">Issues resolved</p>
                         <p class="text-gray-500 text-xs mt-3">Last check: <span class="last-check">--:--:--</span></p>
                     </div>
 
                     <div class="agent-card bg-gray-700 rounded-lg p-4" data-agent="communication">
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="font-semibold text-white">Communication</h3>
-                            <span class="status-idle px-3 py-1 rounded text-xs font-medium">Idle</span>
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-semibold text-white">💬 Communication</h3>
+                            <span class="bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs font-medium">Idle</span>
                         </div>
-                        <div class="text-2xl font-bold text-indigo-400 mb-2">0</div>
+                        <p class="text-gray-500 text-xs mb-3">Teams alerts &amp; post-mortems</p>
+                        <div class="text-2xl font-bold text-indigo-400 mb-1">0</div>
                         <p class="text-gray-400 text-sm">Notifications sent</p>
                         <p class="text-gray-500 text-xs mt-3">Last check: <span class="last-check">--:--:--</span></p>
                     </div>
@@ -115,23 +120,32 @@
             <!-- Incident Timeline -->
             <div class="bg-gray-800 rounded-lg shadow p-6 mb-8">
                 <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-2xl font-bold text-white">Incident Timeline</h2>
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        Incident Timeline
+                        <span id="active-incident-count" class="hidden text-sm bg-red-600 text-white px-2 py-1 rounded-full">0 active</span>
+                    </h2>
                     <div class="flex gap-3">
+                        <button id="clear-incidents" class="hidden bg-gray-700 hover:bg-gray-600 text-gray-300 px-4 py-2 rounded-lg text-sm font-medium transition">
+                            Clear All
+                        </button>
                         <select id="scenario-select" class="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium border border-gray-600 focus:border-blue-500 focus:outline-none">
                             <option value="">Select Incident Type...</option>
-                            <optgroup label="Original Scenarios">
+                            <optgroup label="Database">
                                 <option value="database-spike">Database Connection Pool</option>
-                                <option value="memory-leak">Memory Leak</option>
-                                <option value="rate-limit">API Rate Limit</option>
+                                <option value="database-deadlock">Database Deadlock</option>
+                                <option value="slow-query">Slow Database Query</option>
                             </optgroup>
-                            <optgroup label="New Scenarios">
+                            <optgroup label="Application">
+                                <option value="memory-leak">Memory Leak</option>
+                                <option value="cpu-spike">High CPU Load</option>
+                                <option value="rate-limit">API Rate Limit</option>
+                                <option value="cache-down">Redis Cache Down</option>
+                                <option value="new-feature-bug">New Feature Bug (No Rollback)</option>
+                            </optgroup>
+                            <optgroup label="Infrastructure">
                                 <option value="failed-deployment">Failed Deployment (v2.4.1)</option>
                                 <option value="disk-space">Disk Space Critical</option>
                                 <option value="ssl-expiring">SSL Certificate Expiring</option>
-                                <option value="cpu-spike">High CPU Load</option>
-                                <option value="database-deadlock">Database Deadlock</option>
-                                <option value="cache-down">Redis Cache Down</option>
-                                <option value="slow-query">Slow Database Query</option>
                             </optgroup>
                         </select>
                         <button id="trigger-demo" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
@@ -142,28 +156,31 @@
 
                 <div id="incidents-list" class="space-y-4">
                     <div class="text-center py-8 text-gray-400">
-                        <p class="text-lg">No incidents detected yet</p>
-                        <p class="text-sm mt-2">Click "Trigger Demo Incident" to see the dashboard in action</p>
+                        <p class="text-4xl mb-3">🔒</p>
+                        <p class="text-lg">No incidents detected</p>
+                        <p class="text-sm mt-2">Select a scenario and click "Trigger Incident" to see the system in action</p>
                     </div>
                 </div>
             </div>
 
             <!-- Agent Logs Terminal -->
             <div class="bg-gray-800 rounded-lg shadow p-6">
-                <h2 class="text-2xl font-bold text-white mb-4">Agent Logs</h2>
-                <div id="terminal" class="bg-black rounded-lg font-mono text-sm h-64 overflow-y-auto border border-gray-700 p-4 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold text-white">Agent Logs</h2>
+                    <button id="clear-logs" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-medium transition">
+                        Clear Logs
+                    </button>
+                </div>
+                <div id="terminal" class="bg-black rounded-lg font-mono text-sm h-96 overflow-y-auto border border-gray-700 p-4">
                     <div id="logs-container" class="space-y-1">
                         <div class="text-green-400">
-                            <span class="text-gray-600">[$(date)]</span> Azure Incident Resolver Dashboard Started
+                            <span class="text-gray-600" id="startup-time"></span> Azure Incident Resolver Dashboard Started
                         </div>
                         <div class="text-green-400">
-                            <span class="text-gray-600">[system]</span> Ready to detect incidents...
+                            <span class="text-gray-600">[system]</span> All 4 agents online — ready to detect incidents...
                         </div>
                     </div>
                 </div>
-                <button id="clear-logs" class="mt-4 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-medium transition">
-                    Clear Logs
-                </button>
             </div>
         </main>
     </div>
@@ -172,268 +189,228 @@
         const socket = io();
         let incidents = [];
 
-        // Connection management
-        socket.on('connect', () => {
-            updateConnectionStatus(true);
-        });
-
-        socket.on('disconnect', () => {
-            updateConnectionStatus(false);
-        });
-
-        socket.on('connection_response', (data) => {
-            console.log('Dashboard connected:', data);
-        });
-
-        // Update handlers
-        socket.on('agent_status', (data) => {
-            updateAgentStatus(data);
-        });
-
-        socket.on('agent_status_update', (data) => {
-            Object.keys(data).forEach(agent => {
-                updateSingleAgent(agent, data[agent]);
-            });
-        });
-
-        socket.on('incidents_update', (data) => {
-            incidents = data;
-            renderIncidents();
-        });
-
-        socket.on('new_incident', (incident) => {
-            incidents.unshift(incident);
-            renderIncidents();
-        });
-
-        socket.on('incident_update', (incident) => {
-            const idx = incidents.findIndex(i => i.id === incident.id);
-            if (idx >= 0) {
-                incidents[idx] = incident;
-                renderIncidents();
-            }
-        });
-
-        socket.on('metrics_update', (data) => {
-            updateMetrics(data);
-        });
-
-        socket.on('new_log', (log) => {
-            addLogToTerminal(log);
-        });
-
-        socket.on('logs_update', (data) => {
-            data.forEach(log => addLogToTerminal(log));
-        });
-
-        // UI Update Functions
-        function updateConnectionStatus(connected) {
-            const status = document.getElementById('connection-status');
-            const text = document.getElementById('connection-text');
-            if (connected) {
-                status.innerHTML = '<span class="inline-block w-3 h-3 bg-green-500 rounded-full mr-2"></span><span id="connection-text">Connected</span>';
-            } else {
-                status.innerHTML = '<span class="inline-block w-3 h-3 bg-red-500 rounded-full mr-2"></span><span id="connection-text">Disconnected</span>';
-            }
+        // Live clock
+        function updateClock() {
+            document.getElementById('live-clock').textContent = new Date().toLocaleTimeString();
         }
+        updateClock();
+        setInterval(updateClock, 1000);
+
+        // Connection
+        socket.on('connect', () => {
+            document.getElementById('connection-status').innerHTML =
+                '<span class="inline-block w-3 h-3 bg-green-500 rounded-full mr-2"></span><span>Connected</span>';
+        });
+        socket.on('disconnect', () => {
+            document.getElementById('connection-status').innerHTML =
+                '<span class="inline-block w-3 h-3 bg-red-500 rounded-full mr-2"></span><span>Disconnected</span>';
+        });
+        socket.on('connection_response', (data) => console.log('Connected:', data));
+
+        // Data handlers
+        socket.on('agent_status', updateAgentStatus);
+        socket.on('agent_status_update', (data) => Object.keys(data).forEach(a => updateSingleAgent(a, data[a])));
+        socket.on('incidents_update', (data) => { incidents = data; renderIncidents(); });
+        socket.on('new_incident', (inc) => { incidents.unshift(inc); renderIncidents(); });
+        socket.on('incident_update', (inc) => {
+            const idx = incidents.findIndex(i => i.id === inc.id);
+            if (idx >= 0) { incidents[idx] = inc; renderIncidents(); }
+        });
+        socket.on('metrics_update', updateMetrics);
+        socket.on('new_log', addLogToTerminal);
+        socket.on('logs_update', (data) => data.forEach(addLogToTerminal));
 
         function updateAgentStatus(data) {
-            Object.keys(data).forEach(agent => {
-                updateSingleAgent(agent, data[agent]);
-            });
+            Object.keys(data).forEach(a => updateSingleAgent(a, data[a]));
         }
 
         function updateSingleAgent(agentName, agentData) {
             const card = document.querySelector(`[data-agent="${agentName}"]`);
             if (!card) return;
+            const statusEl = card.querySelector('span.px-3');
+            const countEl  = card.querySelector('.text-2xl');
+            const lastEl   = card.querySelector('.last-check');
 
-            const statusEl = card.querySelector('span');
-            const countEl = card.querySelector('.text-2xl');
-            const lastCheckEl = card.querySelector('.last-check');
+            const working = agentData.status === 'working';
+            statusEl.className = `${working ? 'bg-blue-900 text-blue-300 animate-pulse' : 'bg-gray-600 text-gray-300'} px-3 py-1 rounded text-xs font-medium`;
+            statusEl.textContent = working ? 'Working' : 'Idle';
 
-            const status = agentData.status === 'working' ? 'status-working' : 'status-idle';
-            statusEl.className = `${status} px-3 py-1 rounded text-xs font-medium`;
-            statusEl.textContent = agentData.status.charAt(0).toUpperCase() + agentData.status.slice(1);
-
-            const countKey = Object.keys(agentData).find(k => k.includes('_') && k !== 'last_check' && k !== 'status');
-            if (countKey) {
-                countEl.textContent = agentData[countKey];
-            }
-
-            if (agentData.last_check) {
-                const date = new Date(agentData.last_check);
-                lastCheckEl.textContent = date.toLocaleTimeString();
-            }
+            const countKey = Object.keys(agentData).find(k => k !== 'last_check' && k !== 'status');
+            if (countKey) countEl.textContent = agentData[countKey];
+            if (agentData.last_check) lastEl.textContent = new Date(agentData.last_check).toLocaleTimeString();
         }
 
         function updateMetrics(data) {
             if (data.avg_mttr !== undefined) {
-                document.getElementById('metric-mttr').textContent = data.avg_mttr;
+                const el = document.getElementById('metric-mttr');
+                const unit = document.getElementById('metric-mttr-unit');
+                if (!data.avg_mttr) { el.textContent = '--'; unit.classList.add('hidden'); }
+                else { el.textContent = data.avg_mttr; unit.classList.remove('hidden'); }
             }
-            if (data.incidents_this_week !== undefined) {
-                document.getElementById('metric-incidents').textContent = data.incidents_this_week;
-            }
-            if (data.resolution_rate !== undefined) {
-                document.getElementById('metric-resolution').textContent = data.resolution_rate;
-            }
-            if (data.false_positive_rate !== undefined) {
-                document.getElementById('metric-false-positive').textContent = data.false_positive_rate;
-            }
+            if (data.incidents_this_week !== undefined) document.getElementById('metric-incidents').textContent = data.incidents_this_week;
+            if (data.resolution_rate     !== undefined) document.getElementById('metric-resolution').textContent = data.resolution_rate;
+            if (data.false_positive_rate !== undefined) document.getElementById('metric-false-positive').textContent = data.false_positive_rate;
+        }
+
+        // Phase pipeline
+        const phaseOrder = ['detecting', 'diagnosing', 'resolving', 'communicating', 'resolved'];
+        const phaseConfig = [
+            { key: 'detecting',     icon: '🔍', label: 'Detect',   active: 'text-blue-400',   done: 'text-blue-300 opacity-60' },
+            { key: 'diagnosing',    icon: '🧠', label: 'Diagnose', active: 'text-purple-400', done: 'text-purple-300 opacity-60' },
+            { key: 'resolving',     icon: '🔧', label: 'Resolve',  active: 'text-orange-400', done: 'text-orange-300 opacity-60' },
+            { key: 'communicating', icon: '💬', label: 'Notify',   active: 'text-indigo-400', done: 'text-indigo-300 opacity-60' },
+            { key: 'resolved',      icon: '✅', label: 'Done',     active: 'text-green-400',  done: 'text-green-300 opacity-60' },
+        ];
+
+        function buildPipeline(status) {
+            const cur = phaseOrder.indexOf(status);
+            return phaseConfig.map((p, i) => {
+                let cls, dot;
+                if (i < cur)       { cls = p.done;   dot = '✓'; }
+                else if (i === cur) { cls = p.active + ' font-bold'; dot = status === 'resolved' ? '✓' : '●'; }
+                else               { cls = 'text-gray-600'; dot = '○'; }
+                const sep = i < phaseConfig.length - 1 ? '<span class="text-gray-700 mx-1 text-xs">→</span>' : '';
+                return `<span class="${cls} text-xs" title="${p.label}">${dot}${p.icon}</span>${sep}`;
+            }).join('');
         }
 
         function renderIncidents() {
-            const list = document.getElementById('incidents-list');
+            const list      = document.getElementById('incidents-list');
+            const activeN   = incidents.filter(i => i.status !== 'resolved' && i.status !== 'error').length;
+            const badge     = document.getElementById('active-incident-count');
+            const clearBtn  = document.getElementById('clear-incidents');
+
+            badge.textContent = `${activeN} active`;
+            badge.classList.toggle('hidden', activeN === 0);
+            clearBtn.classList.toggle('hidden', incidents.length === 0);
+
             if (incidents.length === 0) {
-                list.innerHTML = `
-                    <div class="text-center py-8 text-gray-400">
-                        <p class="text-lg">No incidents detected yet</p>
-                        <p class="text-sm mt-2">Click "Trigger Demo Incident" to see the dashboard in action</p>
-                    </div>
-                `;
+                list.innerHTML = `<div class="text-center py-8 text-gray-400">
+                    <p class="text-4xl mb-3">🔒</p>
+                    <p class="text-lg">No incidents detected</p>
+                    <p class="text-sm mt-2">Select a scenario and click "Trigger Incident" to see the system in action</p>
+                </div>`;
                 return;
             }
 
-            list.innerHTML = incidents.map(incident => {
-                const severityColors = {
-                    'critical': { badge: 'bg-red-900 text-red-100', border: 'border-l-4 border-red-600' },
-                    'high': { badge: 'bg-orange-900 text-orange-100', border: 'border-l-4 border-orange-600' },
-                    'medium': { badge: 'bg-yellow-900 text-yellow-100', border: 'border-l-4 border-yellow-600' },
-                    'low': { badge: 'bg-green-900 text-green-100', border: 'border-l-4 border-green-600' }
-                };
-                
-                const colors = severityColors[incident.severity] || severityColors.medium;
-                const isActive = incident.status !== 'resolved';
-                const statusColor = isActive ? 'bg-blue-900 text-blue-100' : 'bg-green-900 text-green-100';
-                
+            const sev = {
+                critical: { badge: 'bg-red-900 text-red-100',    border: 'border-l-4 border-red-500' },
+                high:     { badge: 'bg-orange-900 text-orange-100', border: 'border-l-4 border-orange-500' },
+                medium:   { badge: 'bg-yellow-900 text-yellow-100', border: 'border-l-4 border-yellow-500' },
+                low:      { badge: 'bg-green-900 text-green-100',  border: 'border-l-4 border-green-500' },
+            };
+
+            list.innerHTML = incidents.map(inc => {
+                const c          = sev[inc.severity] || sev.medium;
+                const isResolved = inc.status === 'resolved';
+                const statusCls  = isResolved ? 'bg-green-900 text-green-100' : 'bg-blue-900 text-blue-100 animate-pulse';
+                const cardCls    = isResolved ? 'opacity-60' : '';
+                const pipeline   = buildPipeline(inc.status);
+
                 return `
-                    <div class="incident-card bg-gray-750 rounded-lg overflow-hidden transition cursor-pointer hover:shadow-lg ${colors.border}" data-incident-id="${incident.id}">
-                        <div class="p-4 bg-gray-800 hover:bg-gray-700 transition" onclick="toggleIncidentTimeline(${incident.id})">
-                            <div class="flex justify-between items-start">
-                                <div class="flex-1">
-                                    <div class="flex items-center gap-3 mb-2">
-                                        <span class="text-sm font-mono text-gray-400">#${incident.id}</span>
-                                        <span class="${colors.badge} px-2 py-1 rounded text-xs font-bold uppercase">${incident.severity}</span>
-                                        <span class="${statusColor} px-2 py-1 rounded text-xs font-bold uppercase">${incident.status}</span>
-                                    </div>
-                                    <h3 class="font-semibold text-white text-lg mb-1">${incident.title}</h3>
-                                    <p class="text-sm text-gray-300 mb-3">${incident.description}</p>
-                                    <div class="flex gap-6 text-sm">
-                                        <span class="text-gray-400">📍 <strong>${incident.affected_resource}</strong></span>
-                                        <span class="text-gray-400">⏱️ MTTR: <strong>${incident.mttr}s</strong></span>
-                                        <span class="text-gray-400">🕐 ${new Date(incident.timestamp).toLocaleString()}</span>
-                                    </div>
+                <div class="rounded-lg overflow-hidden ${c.border} ${cardCls}">
+                    <div class="p-4 bg-gray-800 hover:bg-gray-700 transition cursor-pointer" onclick="toggleTimeline(${inc.id})">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <span class="text-sm font-mono text-gray-400">#${inc.id}</span>
+                                    <span class="${c.badge} px-2 py-1 rounded text-xs font-bold uppercase">${inc.severity}</span>
+                                    <span class="${statusCls} px-2 py-1 rounded text-xs font-bold uppercase">${inc.status}</span>
                                 </div>
-                                <div class="text-2xl" id="toggle-${incident.id}">▼</div>
-                            </div>
-                        </div>
-                        
-                        <div class="timeline-content hidden bg-gray-900 border-t border-gray-700 p-6" id="timeline-${incident.id}">
-                            <div class="ml-4">
-                                <h4 class="text-white font-semibold mb-4">Resolution Timeline</h4>
-                                <div class="space-y-4">
-                                    ${(incident.timeline || []).map((step, idx) => `
-                                        <div class="flex gap-4">
-                                            <div class="flex flex-col items-center">
-                                                <div class="w-10 h-10 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 flex items-center justify-center text-white font-bold text-lg">
-                                                    ${step.icon}
-                                                </div>
-                                                ${idx < (incident.timeline.length - 1) ? '<div class="w-1 h-8 bg-gray-700 mt-1"></div>' : ''}
-                                            </div>
-                                            <div class="pt-1 flex-1">
-                                                <p class="text-white font-medium capitalize">${step.agent.replace('-', ' ')}</p>
-                                                <p class="text-gray-300 text-sm">${step.action}</p>
-                                                <p class="text-gray-500 text-xs mt-1">⏰ ${new Date(step.timestamp).toLocaleTimeString()}</p>
-                                            </div>
-                                        </div>
-                                    `).join('')}
+                                <h3 class="font-semibold text-white text-lg mb-1">${inc.title}</h3>
+                                <p class="text-sm text-gray-300 mb-3">${inc.description}</p>
+                                <div class="flex flex-wrap gap-6 text-sm mb-3">
+                                    <span class="text-gray-400">📍 <strong>${inc.affected_resource}</strong></span>
+                                    <span class="text-gray-400">⏱️ MTTR: <strong>${inc.mttr}s</strong></span>
+                                    <span class="text-gray-400">🕐 ${new Date(inc.timestamp).toLocaleString()}</span>
                                 </div>
+                                <div class="flex items-center gap-0">${pipeline}</div>
                             </div>
+                            <div class="text-xl ml-4" id="toggle-${inc.id}">▼</div>
                         </div>
                     </div>
-                `;
+                    <div class="hidden bg-gray-900 border-t border-gray-700 p-6" id="timeline-${inc.id}">
+                        <h4 class="text-white font-semibold mb-4">Resolution Timeline</h4>
+                        <div class="space-y-4 ml-4">
+                            ${(inc.timeline || []).map((step, idx) => `
+                                <div class="flex gap-4">
+                                    <div class="flex flex-col items-center">
+                                        <div class="w-10 h-10 rounded-full bg-gradient-to-b from-blue-600 to-blue-700 flex items-center justify-center text-lg">${step.icon}</div>
+                                        ${idx < inc.timeline.length - 1 ? '<div class="w-1 h-8 bg-gray-700 mt-1"></div>' : ''}
+                                    </div>
+                                    <div class="pt-1">
+                                        <p class="text-white font-medium capitalize">${step.agent}</p>
+                                        <p class="text-gray-300 text-sm">${step.action}</p>
+                                        <p class="text-gray-500 text-xs mt-1">⏰ ${new Date(step.timestamp).toLocaleTimeString()}</p>
+                                    </div>
+                                </div>`).join('')}
+                        </div>
+                    </div>
+                </div>`;
             }).join('');
         }
-        
-        function toggleIncidentTimeline(incidentId) {
-            const timeline = document.getElementById(`timeline-${incidentId}`);
-            const toggle = document.getElementById(`toggle-${incidentId}`);
-            if (timeline) {
-                timeline.classList.toggle('hidden');
-                toggle.textContent = timeline.classList.contains('hidden') ? '▼' : '▲';
-            }
+
+        function toggleTimeline(id) {
+            const el     = document.getElementById(`timeline-${id}`);
+            const toggle = document.getElementById(`toggle-${id}`);
+            if (el) { el.classList.toggle('hidden'); toggle.textContent = el.classList.contains('hidden') ? '▼' : '▲'; }
         }
 
         function addLogToTerminal(log) {
             const container = document.getElementById('logs-container');
-            const timestamp = new Date(log.timestamp).toLocaleTimeString();
-            
-            const agentColors = {
-                'Detection': 'text-cyan-400',
-                'Diagnosis': 'text-yellow-400',
-                'Resolution': 'text-magenta-400',
-                'Communication': 'text-blue-400',
-                'Error': 'text-red-400',
-                'system': 'text-green-400'
+            const ts = new Date(log.timestamp).toLocaleTimeString();
+            const colors = {
+                Detection: 'text-cyan-400', Diagnosis: 'text-yellow-400',
+                Resolution: 'text-pink-400', Communication: 'text-blue-400',
+                Error: 'text-red-400', system: 'text-green-400'
             };
-            
-            const textColor = agentColors[log.agent] || 'text-green-400';
-            
-            const logLine = document.createElement('div');
-            logLine.className = textColor;
-            logLine.innerHTML = `<span class="text-gray-600">[${timestamp}]</span> <span class="font-bold">[${log.agent}]</span> ${log.message}`;
-            
-            container.appendChild(logLine);
-            
-            // Auto-scroll to bottom
+            const line = document.createElement('div');
+            line.className = colors[log.agent] || 'text-green-400';
+            line.innerHTML = `<span class="text-gray-600">[${ts}]</span> <span class="font-bold">[${log.agent}]</span> ${log.message}`;
+            container.appendChild(line);
             const terminal = document.getElementById('terminal');
             terminal.scrollTop = terminal.scrollHeight;
         }
 
-        // Clear logs button
         document.getElementById('clear-logs').addEventListener('click', () => {
-            document.getElementById('logs-container').innerHTML = '';
-            const terminal = document.getElementById('terminal');
-            terminal.innerHTML = '<div id="logs-container"></div>';
+            document.getElementById('terminal').innerHTML = '<div id="logs-container" class="space-y-1"></div>';
         });
 
-        // Demo trigger
+        document.getElementById('clear-incidents').addEventListener('click', () => {
+            incidents = [];
+            renderIncidents();
+        });
+
         document.getElementById('trigger-demo').addEventListener('click', async () => {
-            const select = document.getElementById('scenario-select');
+            const select   = document.getElementById('scenario-select');
             const scenario = select.value;
-            
-            if (!scenario) {
-                alert('Please select an incident type');
-                return;
-            }
+            if (!scenario) { alert('Please select an incident type'); return; }
 
             const btn = document.getElementById('trigger-demo');
             btn.disabled = true;
-            btn.textContent = 'Running Demo...';
+            btn.textContent = 'Running...';
 
             try {
-                const response = await fetch(`/api/demo/trigger-incident/${scenario}`, { method: 'POST' });
-                const data = await response.json();
-                
-                if (response.ok) {
-                    console.log('Demo incident triggered:', scenario, data);
-                    select.value = '';
-                } else {
-                    console.error('Error response:', data);
-                    alert(`Error: ${data.error || 'Failed to trigger incident'}`);
-                }
-            } catch (error) {
-                console.error('Error triggering demo:', error);
-                alert(`Error: ${error.message}`);
+                const res  = await fetch(`/api/demo/trigger-incident/${scenario}`, { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) { select.value = ''; }
+                else { alert(`Error: ${data.error || 'Failed to trigger incident'}`); }
+            } catch (e) {
+                alert(`Error: ${e.message}`);
             } finally {
-                setTimeout(() => {
-                    btn.disabled = false;
-                    btn.textContent = 'Trigger Incident';
-                }, 12000);
+                const durations = {
+                    'database-spike': 8, 'memory-leak': 6,    'rate-limit': 10,
+                    'failed-deployment': 8, 'disk-space': 7,  'ssl-expiring': 9,
+                    'cpu-spike': 8, 'database-deadlock': 5,   'cache-down': 7,
+                    'slow-query': 9, 'new-feature-bug': 10
+                };
+                setTimeout(() => { btn.disabled = false; btn.textContent = 'Trigger Incident'; },
+                    (durations[scenario] || 10) * 1000 + 3000);
             }
         });
 
-        // Request initial state
         socket.emit('request_status');
+        document.getElementById('startup-time').textContent = '[' + new Date().toLocaleTimeString() + ']';
     </script>
 </body>
 </html>

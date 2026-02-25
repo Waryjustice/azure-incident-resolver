@@ -101,7 +101,7 @@ async def run_demo():
     print("✓ Root cause identified (connection leak in API Gateway)")
     print("✓ Database scaled from S1 to S3 tier (immediate fix)")
     print("✓ GitHub PR created with connection pooling improvements")
-    print("✓ Team notified via Teams/Slack")
+    print("✓ Team notified via Teams")
     print("✓ Post-mortem generated and saved to knowledge base")
     print("\nMTTR (Mean Time To Resolution): ~3-4 minutes")
     print("Manual MTTR would typically be: ~45-60 minutes")

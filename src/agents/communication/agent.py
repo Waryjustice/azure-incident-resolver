@@ -2,11 +2,10 @@
 Communication Agent - Handles stakeholder notifications and reporting
 
 This agent:
-- Sends real-time updates to stakeholders (Teams)
 - Generates incident reports and post-mortems
 - Creates timeline of incident events
 - Learns from incidents for future prevention
-- Updates status pages
+- Escalates unresolved incidents to on-call engineers
 """
 
 import os
@@ -14,8 +13,6 @@ import json
 import logging
 from datetime import datetime
 import asyncio
-import aiohttp
-from azure.identity import DefaultAzureCredential
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
 from azure.servicebus import ServiceBusMessage
 
@@ -30,8 +27,6 @@ logger = logging.getLogger(__name__)
 
 class CommunicationAgent:
     def __init__(self):
-        self.teams_webhook = os.getenv("TEAMS_WEBHOOK_URL")
-        
         # Service Bus configuration
         self.servicebus_connection_string = os.getenv("AZURE_SERVICEBUS_CONNECTION_STRING")
         self.input_queue_name = "resolution-to-communication"
@@ -63,11 +58,7 @@ class CommunicationAgent:
         logger.info(f"[Communication Agent] Notifying detection: {incident_id}")
         
         message = self._format_detection_message(incident)
-        
-        # Send to Teams
-        if self.teams_webhook:
-            await self._send_teams_message(message)
-        
+        logger.info(f"[Communication Agent] Detection message: {message['title']}")
         logger.info("[Communication Agent] [SUCCESS] Detection notification sent")
     
     async def notify_diagnosis(self, diagnosis):
@@ -76,10 +67,7 @@ class CommunicationAgent:
         logger.info(f"[Communication Agent] Notifying diagnosis: {incident_id}")
         
         message = self._format_diagnosis_message(diagnosis)
-        
-        if self.teams_webhook:
-            await self._send_teams_message(message)
-        
+        logger.info(f"[Communication Agent] Diagnosis message: {message['title']}")
         logger.info("[Communication Agent] [SUCCESS] Diagnosis notification sent")
     
     async def notify_resolution(self, resolution):
@@ -88,10 +76,7 @@ class CommunicationAgent:
         logger.info(f"[Communication Agent] Notifying resolution: {incident_id}")
         
         message = self._format_resolution_message(resolution)
-        
-        if self.teams_webhook:
-            await self._send_teams_message(message)
-        
+        logger.info(f"[Communication Agent] Resolution message: {message['title']}")
         logger.info("[Communication Agent] [SUCCESS] Resolution notification sent")
     
     async def generate_post_mortem(self, full_incident_data):
@@ -135,30 +120,11 @@ class CommunicationAgent:
         # - Include all incident context
         # - Add runbook links
         
-        escalation_message = {
-            "title": f"🚨 ESCALATION REQUIRED: {incident_id}",
-            "text": f"""
-Automated resolution failed - manual intervention needed
-
-**Root Cause**: {incident.get('diagnosis', {}).get('root_cause', {}).get('description', 'Unknown')}
-
-**Impact**: {incident.get('diagnosis', {}).get('impact', {}).get('business_impact', 'Unknown')}
-
-**Attempted Actions**: {incident.get('resolution', {}).get('immediate_fix', {}).get('action', 'None')}
-
-**Status**: {incident.get('status', 'unknown').upper()}
-
-Please investigate immediately.
-            """,
-            "color": "danger",
-            "priority": "high"
-        }
-        
-        # Send escalation to Teams
-        if self.teams_webhook:
-            await self._send_teams_message(escalation_message)
-        
-        logger.info("[Communication Agent] [SUCCESS] Escalation sent")
+        logger.error(f"[Communication Agent] ESCALATION — manual intervention needed for {incident_id}")
+        logger.error(f"  Root Cause: {incident.get('diagnosis', {}).get('root_cause', {}).get('description', 'Unknown')}")
+        logger.error(f"  Business Impact: {incident.get('diagnosis', {}).get('impact', {}).get('business_impact', 'Unknown')}")
+        logger.error(f"  Attempted: {incident.get('resolution', {}).get('immediate_fix', {}).get('action', 'None')}")
+        logger.info("[Communication Agent] [SUCCESS] Escalation logged")
     
     def _format_detection_message(self, incident):
         """Format detection notification message"""
@@ -276,105 +242,6 @@ Please investigate immediately.
         """Send post-mortem to stakeholders"""
         # TODO: Format and send comprehensive post-mortem
         logger.info(f"[Communication Agent] Sending post-mortem: {post_mortem['incident_id']}")
-    
-    async def _send_teams_message(self, message):
-        """Send properly formatted Teams Adaptive Card to webhook"""
-        
-        if not self.teams_webhook:
-            logger.warning("TEAMS_WEBHOOK_URL not configured - skipping Teams notification")
-            return False
-        
-        try:
-            # Build Teams Adaptive Card with proper formatting
-            card = self._build_teams_adaptive_card(message)
-            
-            # Send via HTTP POST
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.teams_webhook,
-                    json=card,
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    if response.status == 200:
-                        logger.info(f"[Communication Agent] Teams message sent: {message.get('title', 'Notification')}")
-                        return True
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"[Communication Agent] Failed to send Teams message: {response.status} - {error_text}")
-                        return False
-                        
-        except asyncio.TimeoutError:
-            logger.error("[Communication Agent] Teams webhook request timed out")
-            return False
-        except Exception as e:
-            logger.error(f"[Communication Agent] Error sending Teams message: {e}", exc_info=True)
-            return False
-    
-    def _build_teams_adaptive_card(self, message):
-        """Build a properly formatted Teams Adaptive Card"""
-        
-        title = message.get('title', 'Incident Notification')
-        text = message.get('text', '')
-        color = message.get('color', 'accent')
-        priority = message.get('priority', 'normal')
-        
-        # Map color to theme color
-        theme_color_map = {
-            'danger': 'FF0000',      # Red
-            'warning': 'FF6600',      # Orange
-            'info': '0078D4',         # Blue
-            'good': '00CC00',         # Green
-            'accent': '0078D4'        # Default blue
-        }
-        
-        theme_color = theme_color_map.get(color, '0078D4')
-        
-        # Build adaptive card
-        card = {
-            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-            "type": "AdaptiveCard",
-            "version": "1.4",
-            "body": [
-                {
-                    "type": "Container",
-                    "style": "emphasis",
-                    "items": [
-                        {
-                            "type": "ColumnSet",
-                            "columns": [
-                                {
-                                    "width": "stretch",
-                                    "items": [
-                                        {
-                                            "type": "TextBlock",
-                                            "text": title,
-                                            "weight": "bolder",
-                                            "size": "large",
-                                            "color": color if color != 'accent' else None
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "type": "TextBlock",
-                    "text": text,
-                    "wrap": True,
-                    "spacing": "medium"
-                }
-            ],
-            "actions": [
-                {
-                    "type": "Action.OpenUrl",
-                    "title": "View in Dashboard",
-                    "url": f"{os.getenv('DASHBOARD_URL', 'http://localhost:8000')}/incidents"
-                }
-            ]
-        }
-        
-        return card
     
     
     async def start_listening(self):

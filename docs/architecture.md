@@ -56,7 +56,7 @@ Azure Incident Resolver is a multi-agent system that automates incident detectio
                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                  External Integrations                           │
-│         Teams, Slack, GitHub, Status Pages                       │
+│         Teams, GitHub, Status Pages                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

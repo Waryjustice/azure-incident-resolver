@@ -288,22 +288,9 @@ python src/orchestration/orchestrator.py --test
 
 ---
 
-## 📺 Demo Video
-
-🎬 **[Watch 2-Minute Demo Video]
-
-See Azure Incident Resolver in action:
-- Real incident detection
-- AI-powered diagnosis
-- Automated resolution
-- GitHub PR creation
-- End-to-end workflow
-
----
-
 ## 👥 Team
 
-- **Shaurya Singh** - [Microsoft Learn: YOUR_USERNAME_HERE]
+- **Shaurya Singh** - [Microsoft Learn: Shaurya Singh](https://learn.microsoft.com/en-us/users/shaurya-singh)
 
 *Built for Microsoft AI Dev Days Hackathon 2026*
 

@@ -10,6 +10,7 @@ This orchestrator:
 """
 
 import asyncio
+import json
 from datetime import datetime
 import sys
 import os
@@ -21,6 +22,46 @@ from agents.detection.agent import DetectionAgent
 from agents.diagnosis.agent import DiagnosisAgent
 from agents.resolution.agent import ResolutionAgent
 from agents.communication.agent import CommunicationAgent
+from semantic_kernel import Kernel
+from semantic_kernel.functions import kernel_function
+
+
+class _DiagnosisPlugin:
+    """Semantic Kernel plugin — AI-powered root cause analysis."""
+    def __init__(self, agent: DiagnosisAgent):
+        self._agent = agent
+
+    @kernel_function(name="diagnose", description="Analyze an incident and identify root cause using AI")
+    async def diagnose(self, incident_json: str) -> str:
+        result = await self._agent.diagnose_incident(json.loads(incident_json))
+        return json.dumps(result) if result else "{}"
+
+
+class _ResolutionPlugin:
+    """Semantic Kernel plugin — automated incident remediation."""
+    def __init__(self, agent: ResolutionAgent):
+        self._agent = agent
+
+    @kernel_function(name="resolve", description="Execute automated remediation for a diagnosed incident")
+    async def resolve(self, diagnosis_json: str) -> str:
+        result = await self._agent.resolve_incident(json.loads(diagnosis_json))
+        return json.dumps(result) if result else "{}"
+
+
+class _CommunicationPlugin:
+    """Semantic Kernel plugin — stakeholder notifications and post-mortems."""
+    def __init__(self, agent: CommunicationAgent):
+        self._agent = agent
+
+    @kernel_function(name="notify", description="Send notifications for incident lifecycle events")
+    async def notify(self, incident_json: str) -> str:
+        await self._agent.handle_incident_lifecycle(json.loads(incident_json))
+        return "ok"
+
+    @kernel_function(name="post_mortem", description="Generate a post-mortem report for a resolved incident")
+    async def post_mortem(self, incident_json: str) -> str:
+        result = await self._agent.generate_post_mortem(json.loads(incident_json))
+        return json.dumps(result) if result else "{}"
 
 
 class IncidentOrchestrator:
@@ -30,12 +71,19 @@ class IncidentOrchestrator:
         self.diagnosis_agent = DiagnosisAgent()
         self.resolution_agent = ResolutionAgent()
         self.communication_agent = CommunicationAgent()
-        
+
+        # Register agents as Semantic Kernel plugins
+        self.kernel = Kernel()
+        self.kernel.add_plugin(_DiagnosisPlugin(self.diagnosis_agent), plugin_name="DiagnosisAgent")
+        self.kernel.add_plugin(_ResolutionPlugin(self.resolution_agent), plugin_name="ResolutionAgent")
+        self.kernel.add_plugin(_CommunicationPlugin(self.communication_agent), plugin_name="CommunicationAgent")
+
         # Incident state management
         self.active_incidents = {}
         self.incident_history = []
         
         print("[Orchestrator] 🚀 Azure Incident Resolver initialized")
+        print("[Orchestrator] ✅ Semantic Kernel initialized — agents registered as plugins")
         print("[Orchestrator] All agents ready")
     
     async def start(self):
@@ -78,11 +126,14 @@ class IncidentOrchestrator:
             # Phase 1: Detection (already done, notify stakeholders)
             print("[Orchestrator] Phase 1/4: Detection")
             incident["phase"] = "detected"
-            await self.communication_agent.handle_incident_lifecycle(incident)
+            notify_fn = self.kernel.get_function("CommunicationAgent", "notify")
+            await self.kernel.invoke(notify_fn, incident_json=json.dumps(incident, default=str))
             
             # Phase 2: Diagnosis
             print("\n[Orchestrator] Phase 2/4: Diagnosis")
-            diagnosis = await self.diagnosis_agent.diagnose_incident(incident)
+            diagnose_fn = self.kernel.get_function("DiagnosisAgent", "diagnose")
+            result = await self.kernel.invoke(diagnose_fn, incident_json=json.dumps(incident, default=str))
+            diagnosis = json.loads(str(result)) if str(result) and str(result) != "{}" else None
             
             if not diagnosis:
                 print("[Orchestrator] ❌ Diagnosis failed - escalating")
@@ -91,11 +142,13 @@ class IncidentOrchestrator:
             
             incident["diagnosis"] = diagnosis
             diagnosis["phase"] = "diagnosed"
-            await self.communication_agent.handle_incident_lifecycle(diagnosis)
+            await self.kernel.invoke(notify_fn, incident_json=json.dumps(diagnosis, default=str))
             
             # Phase 3: Resolution
             print("\n[Orchestrator] Phase 3/4: Resolution")
-            resolution = await self.resolution_agent.resolve_incident(diagnosis)
+            resolve_fn = self.kernel.get_function("ResolutionAgent", "resolve")
+            result = await self.kernel.invoke(resolve_fn, diagnosis_json=json.dumps(diagnosis, default=str))
+            resolution = json.loads(str(result)) if str(result) and str(result) != "{}" else None
             
             if not resolution or resolution["status"] != "resolved":
                 print("[Orchestrator] ❌ Resolution failed - escalating")
@@ -104,11 +157,12 @@ class IncidentOrchestrator:
             
             incident["resolution"] = resolution
             resolution["phase"] = "resolved"
-            await self.communication_agent.handle_incident_lifecycle(resolution)
+            await self.kernel.invoke(notify_fn, incident_json=json.dumps(resolution, default=str))
             
             # Phase 4: Post-incident communication
             print("\n[Orchestrator] Phase 4/4: Post-Incident Communication")
-            await self.communication_agent.generate_post_mortem(incident)
+            post_mortem_fn = self.kernel.get_function("CommunicationAgent", "post_mortem")
+            await self.kernel.invoke(post_mortem_fn, incident_json=json.dumps(incident, default=str))
             
             # Move to history
             incident["completed_at"] = datetime.utcnow().isoformat()

@@ -2,11 +2,13 @@
 azure-identity==1.15.0
 azure-monitor-query==1.3.0
 azure-mgmt-monitor==6.0.2
+azure-mgmt-sql==3.0.1
+azure-mgmt-web==7.2.0
 azure-functions==1.18.0
-azure-ai-openai==1.0.0
+azure-ai-inference>=1.0.0b9
 
-# Microsoft Agent Framework
-# Note: Add specific package once available from Microsoft
+# Microsoft Agent Framework (Semantic Kernel)
+semantic-kernel>=1.0.0
 
 # Web framework
 fastapi==0.109.0

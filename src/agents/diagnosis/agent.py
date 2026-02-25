@@ -3,27 +3,54 @@ Diagnosis Agent - Analyzes incidents and determines root cause
 
 This agent:
 - Receives incident data from Detection Agent
-- Queries logs, traces, and metrics across systems
-- Uses Microsoft Foundry RAG to search past incidents
-- Identifies root cause and impact scope
+- Queries logs and metrics across systems
+- Uses GitHub Models AI (gpt-4o-mini) to identify root cause
+- Searches past incidents for patterns (in-memory RAG)
 - Sends diagnosis to Resolution Agent
 """
 
 import os
 import json
 from datetime import datetime
-from azure.identity import DefaultAzureCredential
+from azure.ai.inference import ChatCompletionsClient
+from azure.ai.inference.models import SystemMessage, UserMessage
+from azure.core.credentials import AzureKeyCredential
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
 from azure.servicebus import ServiceBusMessage
 import asyncio
 
+_SYSTEM_PROMPT = """You are an expert Site Reliability Engineer diagnosing production incidents in Azure environments.
+Analyze the incident data provided and identify the root cause.
+Respond with ONLY a valid JSON object in this exact format (no markdown, no explanation):
+{
+  "type": "snake_case_type",
+  "description": "Clear one-sentence description of the root cause",
+  "affected_component": "Component name",
+  "evidence": ["Evidence point 1", "Evidence point 2", "Evidence point 3"]
+}"""
+
 
 class DiagnosisAgent:
     def __init__(self):
-        self.foundry_endpoint = os.getenv("FOUNDRY_ENDPOINT")
-        self.foundry_api_key = os.getenv("FOUNDRY_API_KEY")
         self.timeout = int(os.getenv("DIAGNOSIS_TIMEOUT_SECONDS", 300))
-        
+        self._incident_history = []  # In-memory store for simple RAG
+
+        # GitHub Models AI client
+        github_token = os.getenv("GITHUB_TOKEN")
+        self.model_name = os.getenv("GITHUB_MODEL_NAME", "openai/gpt-4o-mini")
+        self._ai_client = None
+        if github_token:
+            try:
+                self._ai_client = ChatCompletionsClient(
+                    endpoint="https://models.github.ai/inference",
+                    credential=AzureKeyCredential(github_token),
+                )
+                print(f"[Diagnosis Agent] ✅ GitHub Models AI client initialized ({self.model_name})")
+            except Exception as e:
+                print(f"[Diagnosis Agent] ⚠️  Could not initialize GitHub Models client: {e}")
+        else:
+            print("[Diagnosis Agent] ⚠️  GITHUB_TOKEN not set — AI diagnosis unavailable")
+
         # Service Bus configuration
         self.servicebus_connection_string = os.getenv("AZURE_SERVICEBUS_CONNECTION_STRING")
         self.input_queue_name = "detection-to-diagnosis"
@@ -65,6 +92,14 @@ class DiagnosisAgent:
             print(f"[Diagnosis Agent] [SUCCESS] Diagnosis complete")
             print(f"  Root Cause: {root_cause['description']}")
             print(f"  Confidence: {diagnosis['confidence']}%")
+
+            # Store in history for future RAG lookups
+            self._incident_history.append({
+                "incident_id": incident["id"],
+                "root_cause": root_cause,
+                "context": context,
+                "resolution_hint": root_cause.get("type", ""),
+            })
             
             # Send diagnosis to Resolution Agent via Service Bus
             await self.send_to_resolution_agent(diagnosis)
@@ -76,84 +111,150 @@ class DiagnosisAgent:
             return None
     
     async def gather_context(self, incident):
-        """Gather additional context about the incident"""
-        # TODO: Implement context gathering
-        # - Query related resources
-        # - Get recent deployments
-        # - Check for configuration changes
-        # - Gather dependency health status
-        
-        context = {
-            "resource_details": {},
+        """Gather structured context from the incident"""
+        resource = incident.get("resource", {})
+        anomalies = incident.get("anomalies", [])
+        return {
+            "resource_type": resource.get("type", "Unknown"),
+            "resource_name": resource.get("name", "Unknown"),
+            "anomaly_count": len(anomalies),
+            "anomaly_metrics": [a.get("metric") for a in anomalies],
+            "peak_values": {a.get("metric"): a.get("value") for a in anomalies},
+            "thresholds": {a.get("metric"): a.get("threshold") for a in anomalies},
             "recent_deployments": [],
             "config_changes": [],
-            "dependencies": []
         }
-        
-        return context
     
     async def search_past_incidents(self, context):
-        """Search for similar past incidents using Microsoft Foundry RAG"""
-        # TODO: Implement Microsoft Foundry integration
-        # - Convert incident to embedding
-        # - Search vector database of past incidents
-        # - Retrieve relevant runbooks and solutions
-        
-        try:
-            # Example Foundry query
-            # query = self._build_foundry_query(context)
-            # response = await self.foundry_client.search(query)
-            
-            similar_incidents = [
-                # {
-                #     "id": "INC-20250101120000",
-                #     "similarity": 0.89,
-                #     "resolution": "Scaled database tier from S1 to S3"
-                # }
-            ]
-            
-            return similar_incidents
-            
-        except Exception as e:
-            print(f"[Diagnosis Agent] Failed to search past incidents: {e}")
+        """Search in-memory incident history for similar past incidents (simple RAG)"""
+        if not self._incident_history:
             return []
+
+        resource_type = context.get("resource_type", "").lower()
+        metrics = [m.lower() for m in context.get("anomaly_metrics", []) if m]
+
+        matches = []
+        for past in self._incident_history[-20:]:
+            past_rc = past.get("root_cause", {})
+            past_resource = past.get("context", {}).get("resource_type", "").lower()
+            score = 0
+            if past_resource == resource_type:
+                score += 2
+            for metric in metrics:
+                if metric in past_rc.get("type", "").lower() or metric in past_rc.get("description", "").lower():
+                    score += 1
+            if score > 0:
+                matches.append({
+                    "similarity": min(score * 0.3, 0.95),
+                    "root_cause": past_rc,
+                    "resolution_hint": past.get("resolution_hint", ""),
+                })
+        matches.sort(key=lambda x: x["similarity"], reverse=True)
+        return matches[:3]
     
     async def analyze_logs(self, incident, context):
-        """Analyze logs and traces for patterns"""
-        # TODO: Implement log analysis
-        # - Query Application Insights
-        # - Parse error messages
-        # - Identify error patterns
-        # - Correlate events across services
-        
-        analysis = {
-            "error_patterns": [],
-            "suspicious_events": [],
-            "correlation_id": None
+        """Analyze anomaly patterns from incident data"""
+        anomalies = incident.get("anomalies", [])
+        error_patterns = []
+        suspicious_events = []
+        for anomaly in anomalies:
+            metric = anomaly.get("metric", "UNKNOWN")
+            value = anomaly.get("value", 0)
+            threshold = anomaly.get("threshold", 1)
+            ratio = value / threshold if threshold else 0
+            error_patterns.append(f"{metric} at {value} ({ratio:.1f}x threshold of {threshold})")
+            if anomaly.get("severity") in ("critical", "high"):
+                suspicious_events.append(metric)
+        return {
+            "error_patterns": error_patterns,
+            "suspicious_events": suspicious_events,
+            "correlation_id": incident.get("id"),
         }
-        
-        return analysis
     
     async def determine_root_cause(self, incident, context, similar_incidents, log_analysis):
-        """Determine the root cause using AI analysis"""
-        # TODO: Use Azure OpenAI to analyze all gathered data
-        # - Combine all context, logs, and historical data
-        # - Use LLM to reason about root cause
-        # - Cross-reference with similar incidents
-        
-        # Example root cause determination
-        root_cause = {
-            "type": "database_connection_exhaustion",
-            "description": "Database connection pool exhausted due to connection leaks",
-            "affected_component": "API Gateway",
-            "evidence": [
-                "Connection pool at 100% utilization",
-                "Timeout errors in application logs",
-                "Similar pattern in INC-20250101120000"
-            ]
+        """Determine root cause using GitHub Models AI (gpt-4o-mini)"""
+        if self._ai_client:
+            prompt = self._build_prompt(incident, context, similar_incidents, log_analysis)
+            try:
+                response = self._ai_client.complete(
+                    messages=[
+                        SystemMessage(content=_SYSTEM_PROMPT),
+                        UserMessage(content=prompt),
+                    ],
+                    model=self.model_name,
+                    temperature=0.2,
+                    max_tokens=400,
+                )
+                raw = response.choices[0].message.content.strip()
+                # Strip markdown code fences if present
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                root_cause = json.loads(raw)
+                print(f"[Diagnosis Agent] 🤖 AI diagnosis: {root_cause.get('description', '')}")
+                return root_cause
+            except json.JSONDecodeError as e:
+                print(f"[Diagnosis Agent] ⚠️  Could not parse AI response as JSON: {e}")
+            except Exception as e:
+                print(f"[Diagnosis Agent] ⚠️  AI call failed ({e}), using rule-based fallback")
+
+        return self._rule_based_root_cause(incident)
+
+    def _build_prompt(self, incident, context, similar_incidents, log_analysis):
+        """Build a structured prompt for AI diagnosis"""
+        similar_text = ""
+        if similar_incidents:
+            similar_text = "\n\nSIMILAR PAST INCIDENTS:\n"
+            for s in similar_incidents[:2]:
+                rc = s.get("root_cause", {})
+                similar_text += f"  - {rc.get('description', 'Unknown')} (similarity: {s['similarity']:.0%})\n"
+
+        patterns = "\n".join(f"  • {p}" for p in log_analysis.get("error_patterns", []))
+        return f"""INCIDENT: {incident.get('id', 'Unknown')}
+SEVERITY: {incident.get('severity', 'unknown').upper()}
+RESOURCE: {context.get('resource_type')} — {context.get('resource_name')}
+
+ANOMALIES DETECTED:
+{patterns}
+
+PEAK VALUES vs THRESHOLDS:
+{json.dumps(context.get('peak_values', {}), indent=2)}{similar_text}
+
+Based on this data, identify the root cause."""
+
+    def _rule_based_root_cause(self, incident):
+        """Rule-based fallback when AI is unavailable"""
+        anomalies = incident.get("anomalies", [])
+        metric = anomalies[0].get("metric", "UNKNOWN") if anomalies else "UNKNOWN"
+        resource_type = incident.get("resource", {}).get("type", "Unknown")
+        type_map = {
+            "CONNECTION_COUNT":   ("database_connection_exhaustion", "Database connection pool exhausted", "Database"),
+            "MEMORY_USAGE":       ("memory_leak", "Service memory usage critical — likely memory leak", "Application Service"),
+            "ERROR_RATE":         ("elevated_error_rate", "Error rate spike detected", "API Gateway"),
+            "CPU_USAGE":          ("cpu_spike", "CPU utilization exceeded safe threshold", resource_type),
+            "DISK_USAGE":         ("disk_space_exhaustion", "Disk space critically low", resource_type),
+            "QUERY_DURATION":     ("slow_database_query", "Database query performance degraded", "Database"),
+            "RATE_LIMIT_ERRORS":  ("api_rate_limit_breach", "Third-party API rate limit exceeded", "API Gateway"),
+            "DEPLOYMENT_ERROR_RATE": ("failed_deployment", "Recent deployment causing elevated error rate", "Deployment"),
         }
-        
-        return root_cause
+        type_key, description, component = type_map.get(
+            metric,
+            ("unknown_anomaly", f"Anomaly detected in {resource_type}: {metric}", resource_type),
+        )
+        value = anomalies[0].get("value", 0) if anomalies else 0
+        threshold = anomalies[0].get("threshold", 1) if anomalies else 1
+        ratio = (value / max(threshold, 1) - 1) * 100
+        return {
+            "type": type_key,
+            "description": description,
+            "affected_component": component,
+            "evidence": [
+                f"{metric} exceeded threshold by {ratio:.0f}%" if anomalies else "Anomaly detected",
+                f"Severity: {incident.get('severity', 'unknown')}",
+                f"Incident ID: {incident.get('id', 'Unknown')}",
+            ],
+        }
     
     async def assess_impact(self, incident, root_cause):
         """Assess the impact scope of the incident"""

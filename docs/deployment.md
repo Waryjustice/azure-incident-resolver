@@ -16,7 +16,7 @@ Before deploying Azure Incident Resolver, ensure you have:
 ### 1. Clone and Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/azure-incident-resolver.git
+git clone https://github.com/Waryjustice/azure-incident-resolver.git
 cd azure-incident-resolver
 
 # Install dependencies
@@ -213,7 +213,6 @@ resolution:
 communication:
   channels:
     - teams
-    - slack
   notification_levels:
     - critical
     - high
@@ -231,16 +230,6 @@ az keyvault secret set \
   --vault-name azure-incident-resolver-kv \
   --name teams-webhook-url \
   --value YOUR_TEAMS_WEBHOOK_URL
-```
-
-**Slack:**
-```bash
-# Create Slack app and webhook
-# Add webhook URL to Key Vault
-az keyvault secret set \
-  --vault-name azure-incident-resolver-kv \
-  --name slack-webhook-url \
-  --value YOUR_SLACK_WEBHOOK_URL
 ```
 
 ### 2. Test the System
