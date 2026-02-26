@@ -26,6 +26,7 @@
                             <span class="bg-gray-700 bg-opacity-60 text-gray-100 text-xs px-2 py-1 rounded-full">🤖 GitHub Copilot</span>
                             <span class="bg-blue-800 bg-opacity-60 text-blue-100 text-xs px-2 py-1 rounded-full">🔗 Azure MCP</span>
                             <span class="bg-green-800 bg-opacity-60 text-green-100 text-xs px-2 py-1 rounded-full">☁️ Azure SDK</span>
+                            <span class="bg-violet-800 bg-opacity-60 text-violet-100 text-xs px-2 py-1 rounded-full">🧠 Semantic Kernel</span>
                             <span class="bg-purple-800 bg-opacity-60 text-purple-100 text-xs px-2 py-1 rounded-full">🏆 MS AI Dev Days 2026</span>
                         </div>
                     </div>
@@ -109,7 +110,7 @@
                             <h3 class="font-semibold text-white">💬 Communication</h3>
                             <span class="bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs font-medium">Idle</span>
                         </div>
-                        <p class="text-gray-500 text-xs mb-3">Teams alerts &amp; post-mortems</p>
+                        <p class="text-gray-500 text-xs mb-3">Post-mortems &amp; escalation</p>
                         <div class="text-2xl font-bold text-indigo-400 mb-1">0</div>
                         <p class="text-gray-400 text-sm">Notifications sent</p>
                         <p class="text-gray-500 text-xs mt-3">Last check: <span class="last-check">--:--:--</span></p>
@@ -154,6 +155,14 @@
                     </div>
                 </div>
 
+                <!-- Severity Filters -->
+                <div class="flex gap-2 mb-4" id="severity-filters">
+                    <button class="filter-btn bg-gray-600 text-white px-3 py-1 rounded text-xs font-medium" data-filter="all">All</button>
+                    <button class="filter-btn bg-gray-700 hover:bg-gray-600 text-red-300 px-3 py-1 rounded text-xs font-medium" data-filter="critical">🔴 Critical</button>
+                    <button class="filter-btn bg-gray-700 hover:bg-gray-600 text-orange-300 px-3 py-1 rounded text-xs font-medium" data-filter="high">🟠 High</button>
+                    <button class="filter-btn bg-gray-700 hover:bg-gray-600 text-yellow-300 px-3 py-1 rounded text-xs font-medium" data-filter="medium">🟡 Medium</button>
+                </div>
+
                 <div id="incidents-list" class="space-y-4">
                     <div class="text-center py-8 text-gray-400">
                         <p class="text-4xl mb-3">🔒</p>
@@ -188,6 +197,13 @@
     <script>
         const socket = io();
         let incidents = [];
+        let severityFilter = 'all';
+
+        function formatMTTR(secs) {
+            if (!secs) return '--';
+            const m = Math.floor(secs / 60), s = secs % 60;
+            return m > 0 ? `${m}m ${s}s` : `${s}s`;
+        }
 
         // Live clock
         function updateClock() {
@@ -211,7 +227,20 @@
         socket.on('agent_status', updateAgentStatus);
         socket.on('agent_status_update', (data) => Object.keys(data).forEach(a => updateSingleAgent(a, data[a])));
         socket.on('incidents_update', (data) => { incidents = data; renderIncidents(); });
-        socket.on('new_incident', (inc) => { incidents.unshift(inc); renderIncidents(); });
+        socket.on('new_incident', (inc) => {
+            incidents.unshift(inc);
+            renderIncidents();
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator(), gain = ctx.createGain();
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.25);
+                gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+                osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.25);
+            } catch(e) {}
+        });
         socket.on('incident_update', (inc) => {
             const idx = incidents.findIndex(i => i.id === inc.id);
             if (idx >= 0) { incidents[idx] = inc; renderIncidents(); }
@@ -242,10 +271,10 @@
 
         function updateMetrics(data) {
             if (data.avg_mttr !== undefined) {
-                const el = document.getElementById('metric-mttr');
+                const el   = document.getElementById('metric-mttr');
                 const unit = document.getElementById('metric-mttr-unit');
-                if (!data.avg_mttr) { el.textContent = '--'; unit.classList.add('hidden'); }
-                else { el.textContent = data.avg_mttr; unit.classList.remove('hidden'); }
+                el.textContent = formatMTTR(data.avg_mttr);
+                unit.classList.add('hidden');
             }
             if (data.incidents_this_week !== undefined) document.getElementById('metric-incidents').textContent = data.incidents_this_week;
             if (data.resolution_rate     !== undefined) document.getElementById('metric-resolution').textContent = data.resolution_rate;
@@ -276,6 +305,7 @@
 
         function renderIncidents() {
             const list      = document.getElementById('incidents-list');
+            const filtered  = severityFilter === 'all' ? incidents : incidents.filter(i => i.severity === severityFilter);
             const activeN   = incidents.filter(i => i.status !== 'resolved' && i.status !== 'error').length;
             const badge     = document.getElementById('active-incident-count');
             const clearBtn  = document.getElementById('clear-incidents');
@@ -293,6 +323,11 @@
                 return;
             }
 
+            if (filtered.length === 0) {
+                list.innerHTML = `<div class="text-center py-8 text-gray-400"><p class="text-lg">No ${severityFilter} incidents</p></div>`;
+                return;
+            }
+
             const sev = {
                 critical: { badge: 'bg-red-900 text-red-100',    border: 'border-l-4 border-red-500' },
                 high:     { badge: 'bg-orange-900 text-orange-100', border: 'border-l-4 border-orange-500' },
@@ -300,7 +335,7 @@
                 low:      { badge: 'bg-green-900 text-green-100',  border: 'border-l-4 border-green-500' },
             };
 
-            list.innerHTML = incidents.map(inc => {
+            list.innerHTML = filtered.map(inc => {
                 const c          = sev[inc.severity] || sev.medium;
                 const isResolved = inc.status === 'resolved';
                 const statusCls  = isResolved ? 'bg-green-900 text-green-100' : 'bg-blue-900 text-blue-100 animate-pulse';
@@ -321,10 +356,11 @@
                                 <p class="text-sm text-gray-300 mb-3">${inc.description}</p>
                                 <div class="flex flex-wrap gap-6 text-sm mb-3">
                                     <span class="text-gray-400">📍 <strong>${inc.affected_resource}</strong></span>
-                                    <span class="text-gray-400">⏱️ MTTR: <strong>${inc.mttr}s</strong></span>
+                                    <span class="text-gray-400">⏱️ MTTR: <strong>${formatMTTR(inc.mttr)}</strong></span>
                                     <span class="text-gray-400">🕐 ${new Date(inc.timestamp).toLocaleString()}</span>
                                 </div>
                                 <div class="flex items-center gap-0">${pipeline}</div>
+                                ${isResolved ? `<div class="mt-3"><button onclick="downloadPostMortem(${inc.id})" class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded text-xs font-medium transition">📄 Download Post-Mortem</button></div>` : ''}
                             </div>
                             <div class="text-xl ml-4" id="toggle-${inc.id}">▼</div>
                         </div>
@@ -380,6 +416,46 @@
             incidents = [];
             renderIncidents();
         });
+
+        document.getElementById('severity-filters').addEventListener('click', e => {
+            const btn = e.target.closest('.filter-btn');
+            if (!btn) return;
+            severityFilter = btn.dataset.filter;
+            document.querySelectorAll('.filter-btn').forEach(b => {
+                b.classList.toggle('bg-gray-600', b === btn);
+                b.classList.toggle('bg-gray-700', b !== btn);
+            });
+            renderIncidents();
+        });
+
+        function downloadPostMortem(incId) {
+            const inc = incidents.find(i => i.id === incId);
+            if (!inc) return;
+            const lines = [
+                `# Post-Mortem Report`,
+                `## ${inc.title}`,
+                ``,
+                `**Incident ID:** #${inc.id}`,
+                `**Severity:** ${inc.severity.toUpperCase()}`,
+                `**Affected Resource:** ${inc.affected_resource}`,
+                `**Detected:** ${new Date(inc.timestamp).toLocaleString()}`,
+                `**MTTR:** ${formatMTTR(inc.mttr)}`,
+                `**Status:** ${inc.status.toUpperCase()}`,
+                ``,
+                `## Resolution Timeline`,
+                ...(inc.timeline || []).map(step =>
+                    `- [${new Date(step.timestamp).toLocaleTimeString()}] ${step.icon} **${step.agent}**: ${step.action}`
+                ),
+                ``,
+                `---`,
+                `*Generated by Azure Incident Resolver — Microsoft AI Dev Days 2026*`
+            ];
+            const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `post-mortem-incident-${inc.id}.txt`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }
 
         document.getElementById('trigger-demo').addEventListener('click', async () => {
             const select   = document.getElementById('scenario-select');

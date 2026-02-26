@@ -97,6 +97,8 @@ Large enterprises lose **millions in revenue** during production incidents due t
 
 See [docs/architecture.md](docs/architecture.md) for detailed technical architecture.
 
+![Architecture Diagram](architecture-diagram%20(3).svg)
+
 ---
 
 ## 🚀 Quick Start
@@ -182,8 +184,9 @@ python examples/demo-api-rate-limit.py
 
 ### Hero Technologies (Hackathon Requirements)
 - ✅ **Azure MCP** - Model Context Protocol for agent communication via Service Bus
-- ✅ **Microsoft Agent Framework** - Multi-agent orchestration and workflow
+- ✅ **Microsoft Agent Framework (Semantic Kernel)** - Multi-agent orchestration with SK plugins
 - ✅ **GitHub Copilot Agent Mode** - AI-powered code generation for fixes
+- ✅ **GitHub Models** - AI diagnosis via `gpt-4o-mini` (azure-ai-inference)
 
 ### Azure Services
 - **Azure Monitor** - Metrics and observability
@@ -319,6 +322,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## 🔗 Links
 
 - **GitHub Repository**: https://github.com/Waryjustice/azure-incident-resolver
+- **Live Dashboard**: https://incident-resolver-dashboard.azurewebsites.net
 - **Architecture Diagram**: [docs/architecture-diagram.svg](docs/architecture-diagram.svg)
 - **Hackathon**: [Microsoft AI Dev Days 2026](https://devdaysai.microsoft.com)
 

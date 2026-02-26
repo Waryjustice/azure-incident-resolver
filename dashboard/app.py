@@ -500,10 +500,10 @@ def trigger_demo_incident(scenario_type):
                 update_incident_status(incident['id'], 'communicating', int(duration * 0.7))
 
                 # Communication phase
-                add_log('Communication', 'Sending Microsoft Teams notification...')
+                add_log('Communication', 'Generating post-mortem report...')
                 update_agent_status('communication', 'working')
                 time.sleep(1)
-                add_log('Communication', '✓ Teams notification sent to #incidents channel')
+                add_log('Communication', '✓ Post-mortem generated and saved to incident knowledge base')
                 add_log('Communication', f'Post-mortem: {messages["post_mortem"]}')
                 add_log('Communication', f'✓ Incident resolved in {duration}s | ~89% faster than manual MTTR (~{duration * 9}s)')
                 update_agent_status('communication', 'idle', {'notifications_sent': agent_status['communication']['notifications_sent'] + 1})
