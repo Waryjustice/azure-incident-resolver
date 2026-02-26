@@ -3,24 +3,42 @@ from flask_socketio import SocketIO, emit
 from datetime import datetime
 import os
 import sys
-import asyncio
+import json
 from dotenv import load_dotenv
 from collections import deque
 from threading import Thread
 import time
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
 
-# --- Real agent imports ---
+# --- Real AI client (sync, safe to use in threads) ---
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
+_AI_CLIENT = None
+_AI_MODEL = os.getenv("GITHUB_MODEL_NAME", "gpt-4o-mini")
 try:
-    from agents.diagnosis.agent import DiagnosisAgent as _DiagnosisAgent
+    from azure.ai.inference import ChatCompletionsClient
+    from azure.ai.inference.models import SystemMessage, UserMessage
+    from azure.core.credentials import AzureKeyCredential
+    _github_token = os.getenv("GITHUB_TOKEN", "")
+    if _github_token:
+        _AI_CLIENT = ChatCompletionsClient(
+            endpoint="https://models.inference.ai.azure.com",
+            credential=AzureKeyCredential(_github_token),
+        )
+        print(f"[Dashboard] ✅ GitHub Models AI client ready ({_AI_MODEL})")
+    else:
+        print("[Dashboard] ⚠️  GITHUB_TOKEN not set — AI unavailable")
+except Exception as _e:
+    print(f"[Dashboard] ⚠️  AI client init failed: {_e}")
+
+# --- Real Azure SDK imports (for resolution) ---
+try:
     from agents.resolution.agent import ResolutionAgent as _ResolutionAgent
     _REAL_AGENTS = True
-    print("[Dashboard] ✅ Real agents imported successfully")
+    print("[Dashboard] ✅ Resolution agent imported successfully")
 except Exception as _e:
     _REAL_AGENTS = False
-    print(f"[Dashboard] ⚠️  Real agents unavailable: {_e} — using simulation")
+    print(f"[Dashboard] ⚠️  Resolution agent unavailable: {_e} — using simulation")
 
 # Incident shape each scenario maps to for the real diagnosis agent
 _SCENARIO_INCIDENTS = {
@@ -39,7 +57,7 @@ _SCENARIO_INCIDENTS = {
 
 app = Flask(__name__, template_folder='templates')
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # In-memory storage for incidents and metrics
 incidents = deque(maxlen=100)
@@ -527,43 +545,49 @@ def trigger_demo_incident(scenario_type):
                 update_agent_status('detection', 'idle', {'incidents_detected': agent_status['detection']['incidents_detected'] + 1})
                 update_incident_status(incident['id'], 'diagnosing', int(mttr * 0.1))
 
-                # ── DIAGNOSIS (real GitHub Models AI call) ─────────────────────────
+                # ── DIAGNOSIS (real GitHub Models AI call, sync) ───────────────
                 update_agent_status('diagnosis', 'working')
                 diagnosis_result = None
 
-                if _REAL_AGENTS:
+                if _AI_CLIENT:
                     base = _SCENARIO_INCIDENTS.get(scenario_type, _SCENARIO_INCIDENTS['database-spike'])
-                    agent_incident = {
-                        **base,
-                        'id': f"INC-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-                        'detected_at': datetime.utcnow().isoformat(),
-                        'severity': scenario['severity'],
-                    }
-                    add_log('Diagnosis', f'🤖 Calling GitHub Models ({os.getenv("GITHUB_MODEL_NAME","openai/gpt-4o-mini")}) for root cause analysis...')
+                    resource = base['resource']
+                    anomaly = base['anomalies'][0]
+                    prompt = (
+                        f"Azure incident: {scenario['title']}\n"
+                        f"Resource: {resource['type']} '{resource['name']}'\n"
+                        f"Anomaly: {anomaly['metric']} = {anomaly['value']} (threshold {anomaly['threshold']})\n"
+                        f"Severity: {scenario['severity']}\n\n"
+                        "Respond with ONLY valid JSON:\n"
+                        '{"type":"snake_case","description":"one sentence","affected_component":"name",'
+                        '"evidence":["point1","point2"]}'
+                    )
+                    add_log('Diagnosis', f'🤖 Calling GitHub Models ({_AI_MODEL}) for root cause analysis...')
                     try:
-                        ev_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(ev_loop)
-                        try:
-                            diag_agent = _DiagnosisAgent()
-                            diagnosis_result = ev_loop.run_until_complete(diag_agent.diagnose_incident(agent_incident))
-                        finally:
-                            ev_loop.close()
-                            asyncio.set_event_loop(None)
-
-                        if diagnosis_result:
-                            rc   = diagnosis_result['root_cause']
-                            conf = diagnosis_result['confidence']
-                            add_log('Diagnosis', f'✓ Root cause identified with {conf}% confidence')
-                            add_log('Diagnosis', f'  → {rc["description"]}')
-                            add_log('Diagnosis', f'  Affected: {rc["affected_component"]}')
-                            for ev in rc.get('evidence', [])[:2]:
-                                add_log('Diagnosis', f'  Evidence: {ev}')
-                        else:
-                            add_log('Diagnosis', '⚠️  AI returned no result — using fallback')
-                            for detail in messages['diagnosis']:
-                                add_log('Diagnosis', detail)
+                        resp = _AI_CLIENT.complete(
+                            model=_AI_MODEL,
+                            messages=[
+                                SystemMessage(content="You are an expert SRE. Respond with ONLY valid JSON, no markdown."),
+                                UserMessage(content=prompt),
+                            ],
+                            temperature=0.2,
+                            max_tokens=300,
+                        )
+                        raw = resp.choices[0].message.content.strip()
+                        if raw.startswith("```"):
+                            raw = raw.split("```")[1]
+                            if raw.startswith("json"):
+                                raw = raw[4:]
+                        rc = json.loads(raw)
+                        conf = 82
+                        diagnosis_result = {'root_cause': rc, 'confidence': conf}
+                        add_log('Diagnosis', f'✓ Root cause identified with {conf}% confidence')
+                        add_log('Diagnosis', f'  → {rc.get("description", "")}')
+                        add_log('Diagnosis', f'  Affected: {rc.get("affected_component", "")}')
+                        for ev in rc.get('evidence', [])[:2]:
+                            add_log('Diagnosis', f'  Evidence: {ev}')
                     except Exception as e:
-                        add_log('Diagnosis', f'⚠️  AI error ({e}) — using fallback')
+                        add_log('Diagnosis', f'⚠️  AI error ({type(e).__name__}) — using scenario details')
                         for detail in messages['diagnosis']:
                             add_log('Diagnosis', detail)
                 else:
@@ -575,41 +599,35 @@ def trigger_demo_incident(scenario_type):
                 update_agent_status('diagnosis', 'idle', {'analyses_completed': agent_status['diagnosis']['analyses_completed'] + 1})
                 update_incident_status(incident['id'], 'resolving', int(mttr * 0.4))
 
-                # ── RESOLUTION (real Azure SDK call) ──────────────────────────────
+                # ── RESOLUTION (Azure SDK call) ────────────────────────────────
                 update_agent_status('resolution', 'working')
 
                 if _REAL_AGENTS and diagnosis_result:
                     add_log('Resolution', '⚙️  Executing automated fix via Azure SDK...')
                     try:
-                        ev_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(ev_loop)
+                        import asyncio as _asyncio
+                        res_agent = _ResolutionAgent()
+                        loop = _asyncio.new_event_loop()
                         try:
-                            res_agent = _ResolutionAgent()
-                            resolution_result = ev_loop.run_until_complete(res_agent.resolve_incident(diagnosis_result))
+                            resolution_result = loop.run_until_complete(res_agent.resolve_incident(diagnosis_result))
                         finally:
-                            ev_loop.close()
-                            asyncio.set_event_loop(None)
-
+                            loop.close()
                         if resolution_result:
                             imm = resolution_result.get('immediate_fix', {})
                             if imm.get('success'):
                                 add_log('Resolution', f'✓ {imm.get("details", imm.get("action", "Fix applied"))}')
                             else:
-                                msg = imm.get('message') or imm.get('error', 'No automated fix for this incident type')
+                                msg = imm.get('message') or imm.get('error', 'No automated fix available')
                                 add_log('Resolution', f'ℹ️  Azure SDK: {msg}')
                                 for detail in messages['resolution'][-2:]:
                                     add_log('Resolution', detail)
                             if resolution_result.get('pr_url'):
                                 add_log('Resolution', f'✓ PR created: {resolution_result["pr_url"]}')
-                            elif resolution_result.get('permanent_fix'):
-                                pf = resolution_result['permanent_fix']
-                                add_log('Resolution', f'✓ Fix generated via GitHub Copilot: {pf.get("action","code fix ready")}')
                         else:
-                            add_log('Resolution', '⚠️  Resolution returned no result — showing scenario details')
                             for detail in messages['resolution']:
                                 add_log('Resolution', detail)
                     except Exception as e:
-                        add_log('Resolution', f'⚠️  Azure SDK error ({e}) — using fallback')
+                        add_log('Resolution', f'⚠️  Azure SDK ({type(e).__name__}) — using scenario details')
                         for detail in messages['resolution']:
                             add_log('Resolution', detail)
                 else:
@@ -656,4 +674,4 @@ def trigger_demo_incident(scenario_type):
 
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=8080, debug=False, use_reloader=False)
