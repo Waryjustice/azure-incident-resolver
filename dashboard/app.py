@@ -170,77 +170,88 @@ def create_demo_scenarios():
             'severity': 'critical',
             'description': 'Connection pool at 95% capacity, API requests timing out',
             'affected_resource': 'prod-db-01',
-            'duration': 8
+            'duration': 8,       # wall-clock simulation seconds
+            'mttr_seconds': 180  # realistic MTTR to display (3 min)
         },
         'memory-leak': {
             'title': 'Memory Leak Detected',
             'severity': 'high',
             'description': 'Service memory usage at 95%, OOM imminent',
             'affected_resource': 'prod-api-service-03',
-            'duration': 6
+            'duration': 6,
+            'mttr_seconds': 120  # 2 min
         },
         'rate-limit': {
             'title': 'API Rate Limit Breach',
             'severity': 'high',
             'description': 'Third-party API throttling, 42% error rate',
             'affected_resource': 'payment-api-gateway',
-            'duration': 10
+            'duration': 10,
+            'mttr_seconds': 480  # 8 min
         },
         'failed-deployment': {
             'title': 'Failed Deployment v2.4.1',
             'severity': 'critical',
             'description': 'New deployment causes 15% error rate, 25K failed requests',
             'affected_resource': 'api-prod-cluster',
-            'duration': 8
+            'duration': 8,
+            'mttr_seconds': 240  # 4 min
         },
         'disk-space': {
             'title': 'Disk Space Critical',
             'severity': 'critical',
             'description': 'Disk 95% full, logs consuming 450GB, only 2GB free',
             'affected_resource': 'prod-disk-001',
-            'duration': 7
+            'duration': 7,
+            'mttr_seconds': 180  # 3 min
         },
         'ssl-expiring': {
             'title': 'SSL Certificate Expiring',
             'severity': 'high',
             'description': 'SSL cert expires in 5 days for api.prod.azureincidents.com',
             'affected_resource': 'cert-prod-01',
-            'duration': 9
+            'duration': 9,
+            'mttr_seconds': 300  # 5 min
         },
         'cpu-spike': {
             'title': 'Sustained High CPU Load',
             'severity': 'critical',
             'description': 'CPU 98%, response times 8500ms, 15K users affected',
             'affected_resource': 'aks-prod-api',
-            'duration': 8
+            'duration': 8,
+            'mttr_seconds': 240  # 4 min
         },
         'database-deadlock': {
             'title': 'Database Deadlock',
             'severity': 'critical',
             'description': '42 transactions deadlocked, payment processing halted',
             'affected_resource': 'db-prod-payment',
-            'duration': 5
+            'duration': 5,
+            'mttr_seconds': 120  # 2 min
         },
         'cache-down': {
             'title': 'Redis Cache Down',
             'severity': 'critical',
             'description': '100% cache miss, API latency 3500ms, 12K users affected',
             'affected_resource': 'redis-prod-01',
-            'duration': 7
+            'duration': 7,
+            'mttr_seconds': 180  # 3 min
         },
         'slow-query': {
             'title': 'Slow Database Query',
             'severity': 'critical',
             'description': 'Query 35s (normally 0.8s), missing index on 50M row table',
             'affected_resource': 'db-prod-analytics',
-            'duration': 9
+            'duration': 9,
+            'mttr_seconds': 240  # 4 min
         },
         'new-feature-bug': {
             'title': 'New Feature Bug - No Rollback Available',
             'severity': 'critical',
             'description': 'User Dashboard v2.0 NullPointerException, 25K failed requests, no rollback',
             'affected_resource': 'user-dashboard-v2',
-            'duration': 10
+            'duration': 10,
+            'mttr_seconds': 300  # 5 min
         }
     }
 
@@ -470,6 +481,13 @@ def trigger_demo_incident(scenario_type):
 
                 messages = scenario_details.get(scenario_type, scenario_details['database-spike'])
 
+                duration = scenario['duration']
+                mttr = scenario['mttr_seconds']
+
+                def fmt(s):
+                    m, sec = divmod(s, 60)
+                    return f"{m}m {sec}s" if m else f"{sec}s"
+
                 # Detection phase
                 add_log('Detection', f'Scanning resource: {scenario["affected_resource"]}...')
                 update_agent_status('detection', 'working')
@@ -479,7 +497,7 @@ def trigger_demo_incident(scenario_type):
                 for detail in messages['detection']:
                     add_log('Detection', detail)
                 update_agent_status('detection', 'idle', {'incidents_detected': agent_status['detection']['incidents_detected'] + 1})
-                update_incident_status(incident['id'], 'diagnosing', int(duration * 0.15))
+                update_incident_status(incident['id'], 'diagnosing', int(mttr * 0.15))
 
                 # Diagnosis phase
                 add_log('Diagnosis', 'Starting root cause analysis — correlating logs and metrics across systems...')
@@ -489,7 +507,7 @@ def trigger_demo_incident(scenario_type):
                 for detail in messages['diagnosis']:
                     add_log('Diagnosis', detail)
                 update_agent_status('diagnosis', 'idle', {'analyses_completed': agent_status['diagnosis']['analyses_completed'] + 1})
-                update_incident_status(incident['id'], 'resolving', int(duration * 0.4))
+                update_incident_status(incident['id'], 'resolving', int(mttr * 0.4))
 
                 # Resolution phase
                 update_agent_status('resolution', 'working')
@@ -497,7 +515,7 @@ def trigger_demo_incident(scenario_type):
                     add_log('Resolution', detail)
                     time.sleep(0.5)
                 update_agent_status('resolution', 'idle', {'issues_resolved': agent_status['resolution']['issues_resolved'] + 1})
-                update_incident_status(incident['id'], 'communicating', int(duration * 0.7))
+                update_incident_status(incident['id'], 'communicating', int(mttr * 0.8))
 
                 # Communication phase
                 add_log('Communication', 'Generating post-mortem report...')
@@ -505,14 +523,15 @@ def trigger_demo_incident(scenario_type):
                 time.sleep(1)
                 add_log('Communication', '✓ Post-mortem generated and saved to incident knowledge base')
                 add_log('Communication', f'Post-mortem: {messages["post_mortem"]}')
-                add_log('Communication', f'✓ Incident resolved in {duration}s | ~89% faster than manual MTTR (~{duration * 9}s)')
+                manual_mttr = mttr * 9
+                add_log('Communication', f'✓ Incident resolved in {fmt(mttr)} | ~89% faster than manual MTTR (~{fmt(manual_mttr)})')
                 update_agent_status('communication', 'idle', {'notifications_sent': agent_status['communication']['notifications_sent'] + 1})
-                update_incident_status(incident['id'], 'resolved', duration)
+                update_incident_status(incident['id'], 'resolved', mttr)
 
                 # Update metrics with proper running average
                 _resolved_count += 1
                 current_avg = metrics['avg_mttr']
-                new_avg = int(current_avg + (duration - current_avg) / _resolved_count)
+                new_avg = int(current_avg + (mttr - current_avg) / _resolved_count)
                 update_metrics({
                     'incidents_this_week': metrics['incidents_this_week'] + 1,
                     'avg_mttr': new_avg,
