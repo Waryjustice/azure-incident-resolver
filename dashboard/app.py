@@ -2,12 +2,40 @@ from flask import Flask, render_template, jsonify
 from flask_socketio import SocketIO, emit
 from datetime import datetime
 import os
+import sys
+import asyncio
 from dotenv import load_dotenv
 from collections import deque
 from threading import Thread
 import time
 
 load_dotenv()
+
+# --- Real agent imports ---
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
+try:
+    from agents.diagnosis.agent import DiagnosisAgent as _DiagnosisAgent
+    from agents.resolution.agent import ResolutionAgent as _ResolutionAgent
+    _REAL_AGENTS = True
+    print("[Dashboard] ✅ Real agents imported successfully")
+except Exception as _e:
+    _REAL_AGENTS = False
+    print(f"[Dashboard] ⚠️  Real agents unavailable: {_e} — using simulation")
+
+# Incident shape each scenario maps to for the real diagnosis agent
+_SCENARIO_INCIDENTS = {
+    'database-spike':    {'resource': {'type': 'Database',    'name': 'incident-demo-db'},          'anomalies': [{'metric': 'CONNECTION_COUNT',      'value': 847,  'threshold': 100, 'severity': 'critical'}]},
+    'memory-leak':       {'resource': {'type': 'App Service', 'name': 'incident-demo-app-ss2026'},   'anomalies': [{'metric': 'MEMORY_USAGE',          'value': 95,   'threshold': 80,  'severity': 'critical'}]},
+    'rate-limit':        {'resource': {'type': 'API Gateway', 'name': 'payment-api-gateway'},        'anomalies': [{'metric': 'RATE_LIMIT_ERRORS',     'value': 420,  'threshold': 100, 'severity': 'high'}]},
+    'failed-deployment': {'resource': {'type': 'App Service', 'name': 'incident-demo-app-ss2026'},   'anomalies': [{'metric': 'DEPLOYMENT_ERROR_RATE', 'value': 150,  'threshold': 10,  'severity': 'critical'}]},
+    'disk-space':        {'resource': {'type': 'VM',          'name': 'prod-disk-001'},              'anomalies': [{'metric': 'DISK_USAGE',            'value': 95,   'threshold': 80,  'severity': 'critical'}]},
+    'ssl-expiring':      {'resource': {'type': 'App Service', 'name': 'incident-demo-app-ss2026'},   'anomalies': [{'metric': 'CERT_EXPIRY_DAYS',      'value': 5,    'threshold': 30,  'severity': 'high'}]},
+    'cpu-spike':         {'resource': {'type': 'AKS',         'name': 'aks-prod-api'},               'anomalies': [{'metric': 'CPU_USAGE',             'value': 98,   'threshold': 80,  'severity': 'critical'}]},
+    'database-deadlock': {'resource': {'type': 'Database',    'name': 'db-prod-payment'},            'anomalies': [{'metric': 'DEADLOCK_COUNT',        'value': 42,   'threshold': 0,   'severity': 'critical'}]},
+    'cache-down':        {'resource': {'type': 'Redis Cache', 'name': 'redis-prod-01'},              'anomalies': [{'metric': 'CACHE_MISS_RATE',       'value': 100,  'threshold': 20,  'severity': 'critical'}]},
+    'slow-query':        {'resource': {'type': 'Database',    'name': 'db-prod-analytics'},          'anomalies': [{'metric': 'QUERY_DURATION',        'value': 35000,'threshold': 800, 'severity': 'critical'}]},
+    'new-feature-bug':   {'resource': {'type': 'App Service', 'name': 'user-dashboard-v2'},          'anomalies': [{'metric': 'ERROR_RATE',            'value': 42,   'threshold': 5,   'severity': 'critical'}]},
+}
 
 app = Flask(__name__, template_folder='templates')
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -488,7 +516,7 @@ def trigger_demo_incident(scenario_type):
                     m, sec = divmod(s, 60)
                     return f"{m}m {sec}s" if m else f"{sec}s"
 
-                # Detection phase
+                # ── DETECTION (scenario-specific logs, always fast) ────────────────
                 add_log('Detection', f'Scanning resource: {scenario["affected_resource"]}...')
                 update_agent_status('detection', 'working')
                 time.sleep(1)
@@ -497,27 +525,102 @@ def trigger_demo_incident(scenario_type):
                 for detail in messages['detection']:
                     add_log('Detection', detail)
                 update_agent_status('detection', 'idle', {'incidents_detected': agent_status['detection']['incidents_detected'] + 1})
-                update_incident_status(incident['id'], 'diagnosing', int(mttr * 0.15))
+                update_incident_status(incident['id'], 'diagnosing', int(mttr * 0.1))
 
-                # Diagnosis phase
-                add_log('Diagnosis', 'Starting root cause analysis — correlating logs and metrics across systems...')
+                # ── DIAGNOSIS (real GitHub Models AI call) ─────────────────────────
                 update_agent_status('diagnosis', 'working')
-                time.sleep(2)
-                add_log('Diagnosis', '✓ Root cause identified with 87% confidence')
-                for detail in messages['diagnosis']:
-                    add_log('Diagnosis', detail)
+                diagnosis_result = None
+
+                if _REAL_AGENTS:
+                    base = _SCENARIO_INCIDENTS.get(scenario_type, _SCENARIO_INCIDENTS['database-spike'])
+                    agent_incident = {
+                        **base,
+                        'id': f"INC-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+                        'detected_at': datetime.utcnow().isoformat(),
+                        'severity': scenario['severity'],
+                    }
+                    add_log('Diagnosis', f'🤖 Calling GitHub Models ({os.getenv("GITHUB_MODEL_NAME","openai/gpt-4o-mini")}) for root cause analysis...')
+                    try:
+                        ev_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(ev_loop)
+                        try:
+                            diag_agent = _DiagnosisAgent()
+                            diagnosis_result = ev_loop.run_until_complete(diag_agent.diagnose_incident(agent_incident))
+                        finally:
+                            ev_loop.close()
+                            asyncio.set_event_loop(None)
+
+                        if diagnosis_result:
+                            rc   = diagnosis_result['root_cause']
+                            conf = diagnosis_result['confidence']
+                            add_log('Diagnosis', f'✓ Root cause identified with {conf}% confidence')
+                            add_log('Diagnosis', f'  → {rc["description"]}')
+                            add_log('Diagnosis', f'  Affected: {rc["affected_component"]}')
+                            for ev in rc.get('evidence', [])[:2]:
+                                add_log('Diagnosis', f'  Evidence: {ev}')
+                        else:
+                            add_log('Diagnosis', '⚠️  AI returned no result — using fallback')
+                            for detail in messages['diagnosis']:
+                                add_log('Diagnosis', detail)
+                    except Exception as e:
+                        add_log('Diagnosis', f'⚠️  AI error ({e}) — using fallback')
+                        for detail in messages['diagnosis']:
+                            add_log('Diagnosis', detail)
+                else:
+                    time.sleep(2)
+                    add_log('Diagnosis', '✓ Root cause identified with 87% confidence')
+                    for detail in messages['diagnosis']:
+                        add_log('Diagnosis', detail)
+
                 update_agent_status('diagnosis', 'idle', {'analyses_completed': agent_status['diagnosis']['analyses_completed'] + 1})
                 update_incident_status(incident['id'], 'resolving', int(mttr * 0.4))
 
-                # Resolution phase
+                # ── RESOLUTION (real Azure SDK call) ──────────────────────────────
                 update_agent_status('resolution', 'working')
-                for detail in messages['resolution']:
-                    add_log('Resolution', detail)
-                    time.sleep(0.5)
+
+                if _REAL_AGENTS and diagnosis_result:
+                    add_log('Resolution', '⚙️  Executing automated fix via Azure SDK...')
+                    try:
+                        ev_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(ev_loop)
+                        try:
+                            res_agent = _ResolutionAgent()
+                            resolution_result = ev_loop.run_until_complete(res_agent.resolve_incident(diagnosis_result))
+                        finally:
+                            ev_loop.close()
+                            asyncio.set_event_loop(None)
+
+                        if resolution_result:
+                            imm = resolution_result.get('immediate_fix', {})
+                            if imm.get('success'):
+                                add_log('Resolution', f'✓ {imm.get("details", imm.get("action", "Fix applied"))}')
+                            else:
+                                msg = imm.get('message') or imm.get('error', 'No automated fix for this incident type')
+                                add_log('Resolution', f'ℹ️  Azure SDK: {msg}')
+                                for detail in messages['resolution'][-2:]:
+                                    add_log('Resolution', detail)
+                            if resolution_result.get('pr_url'):
+                                add_log('Resolution', f'✓ PR created: {resolution_result["pr_url"]}')
+                            elif resolution_result.get('permanent_fix'):
+                                pf = resolution_result['permanent_fix']
+                                add_log('Resolution', f'✓ Fix generated via GitHub Copilot: {pf.get("action","code fix ready")}')
+                        else:
+                            add_log('Resolution', '⚠️  Resolution returned no result — showing scenario details')
+                            for detail in messages['resolution']:
+                                add_log('Resolution', detail)
+                    except Exception as e:
+                        add_log('Resolution', f'⚠️  Azure SDK error ({e}) — using fallback')
+                        for detail in messages['resolution']:
+                            add_log('Resolution', detail)
+                else:
+                    for detail in messages['resolution']:
+                        add_log('Resolution', detail)
+                        time.sleep(0.5)
+
                 update_agent_status('resolution', 'idle', {'issues_resolved': agent_status['resolution']['issues_resolved'] + 1})
                 update_incident_status(incident['id'], 'communicating', int(mttr * 0.8))
 
-                # Communication phase
+                # ── COMMUNICATION ──────────────────────────────────────────────────
                 add_log('Communication', 'Generating post-mortem report...')
                 update_agent_status('communication', 'working')
                 time.sleep(1)
@@ -528,7 +631,7 @@ def trigger_demo_incident(scenario_type):
                 update_agent_status('communication', 'idle', {'notifications_sent': agent_status['communication']['notifications_sent'] + 1})
                 update_incident_status(incident['id'], 'resolved', mttr)
 
-                # Update metrics with proper running average
+                # ── METRICS ────────────────────────────────────────────────────────
                 _resolved_count += 1
                 current_avg = metrics['avg_mttr']
                 new_avg = int(current_avg + (mttr - current_avg) / _resolved_count)
@@ -538,7 +641,7 @@ def trigger_demo_incident(scenario_type):
                     'resolution_rate': min(99, int(85 + (_resolved_count * 0.5))),
                 })
             except Exception as e:
-                print(f"Error in workflow simulation: {str(e)}")
+                print(f"Error in workflow: {str(e)}")
                 add_log('Error', f'Workflow failed: {str(e)}')
                 update_incident_status(incident['id'], 'error')
         

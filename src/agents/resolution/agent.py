@@ -89,33 +89,25 @@ class ResolutionAgent:
     
     async def determine_strategy(self, diagnosis):
         """Determine the best resolution strategy"""
-        root_cause_type = diagnosis["root_cause"]["type"]
-        
-        # Strategy mapping based on root cause
-        strategies = {
-            "database_connection_exhaustion": {
-                "immediate": "scale_database_tier",
-                "permanent": "implement_connection_pooling"
-            },
-            "memory_leak": {
-                "immediate": "restart_service",
-                "permanent": "fix_memory_leak_code"
-            },
-            "rate_limit_breach": {
-                "immediate": "enable_circuit_breaker",
-                "permanent": "implement_backoff_retry"
-            },
-            "deployment_issue": {
-                "immediate": "rollback_deployment",
-                "permanent": "fix_deployment_config"
-            }
-        }
-        
-        strategy = strategies.get(root_cause_type, {
-            "immediate": "manual_investigation_required",
-            "permanent": "create_incident_report"
-        })
-        
+        root_cause_type = diagnosis["root_cause"]["type"].lower()
+
+        # Match by keyword so AI-generated type names (e.g. 'api_rate_limit_breach') still resolve
+        if any(k in root_cause_type for k in ("connection_exhaust", "connection_pool", "db_connection")):
+            immediate, permanent = "scale_database_tier",   "implement_connection_pooling"
+        elif any(k in root_cause_type for k in ("memory_leak", "memory_exhaust", "oom")):
+            immediate, permanent = "restart_service",       "fix_memory_leak_code"
+        elif any(k in root_cause_type for k in ("rate_limit", "circuit", "throttl", "backoff")):
+            immediate, permanent = "enable_circuit_breaker","implement_backoff_retry"
+        elif any(k in root_cause_type for k in ("deployment", "rollback", "deploy_fail")):
+            immediate, permanent = "rollback_deployment",   "fix_deployment_config"
+        elif any(k in root_cause_type for k in ("memory", "leak")):
+            immediate, permanent = "restart_service",       "fix_memory_leak_code"
+        elif any(k in root_cause_type for k in ("database_connect", "database_conn")):
+            immediate, permanent = "scale_database_tier",   "implement_connection_pooling"
+        else:
+            immediate, permanent = "manual_investigation_required", "create_incident_report"
+
+        strategy = {"immediate": immediate, "permanent": permanent}
         print(f"[Resolution Agent] Strategy: {strategy}")
         return strategy
     
