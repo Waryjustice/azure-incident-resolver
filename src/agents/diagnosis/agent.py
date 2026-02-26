@@ -42,7 +42,7 @@ class DiagnosisAgent:
         if github_token:
             try:
                 self._ai_client = ChatCompletionsClient(
-                    endpoint="https://models.github.ai/inference",
+                    endpoint="https://models.inference.ai.azure.com",
                     credential=AzureKeyCredential(github_token),
                 )
                 print(f"[Diagnosis Agent] ✅ GitHub Models AI client initialized ({self.model_name})")
