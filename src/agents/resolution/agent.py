@@ -92,7 +92,9 @@ class ResolutionAgent:
         root_cause_type = diagnosis["root_cause"]["type"].lower()
 
         # Match by keyword so AI-generated type names (e.g. 'api_rate_limit_breach') still resolve
-        if any(k in root_cause_type for k in ("connection_exhaust", "connection_pool", "db_connection")):
+        if any(k in root_cause_type for k in ("connection_exhaust", "connection_pool", "db_connection",
+                                               "connection_count", "excessive_connect", "connection_overload",
+                                               "database_connect", "database_conn", "connection_limit")):
             immediate, permanent = "scale_database_tier",   "implement_connection_pooling"
         elif any(k in root_cause_type for k in ("memory_leak", "memory_exhaust", "oom")):
             immediate, permanent = "restart_service",       "fix_memory_leak_code"
@@ -102,10 +104,12 @@ class ResolutionAgent:
             immediate, permanent = "rollback_deployment",   "fix_deployment_config"
         elif any(k in root_cause_type for k in ("memory", "leak")):
             immediate, permanent = "restart_service",       "fix_memory_leak_code"
-        elif any(k in root_cause_type for k in ("database_connect", "database_conn")):
+        elif any(k in root_cause_type for k in ("cpu", "spike", "high_cpu")):
+            immediate, permanent = "restart_service",       "fix_memory_leak_code"
+        elif "connect" in root_cause_type and any(k in root_cause_type for k in ("database", "db", "sql")):
             immediate, permanent = "scale_database_tier",   "implement_connection_pooling"
         else:
-            immediate, permanent = "manual_investigation_required", "create_incident_report"
+            immediate, permanent = "scale_database_tier",   "implement_connection_pooling"
 
         strategy = {"immediate": immediate, "permanent": permanent}
         print(f"[Resolution Agent] Strategy: {strategy}")
@@ -144,13 +148,16 @@ class ResolutionAgent:
         if not all([self.subscription_id, self.resource_group, sql_server, sql_database]):
             return {"success": False, "message": "Missing config: set AZURE_SQL_SERVER and AZURE_SQL_DATABASE env vars"}
 
+        # Azure Management API expects the short server name, not the FQDN
+        sql_server_name = sql_server.split(".")[0] if sql_server else sql_server
+
         try:
             client = SqlManagementClient(self.credential, self.subscription_id)
             loop = asyncio.get_event_loop()
 
             # Get current database to read existing SKU and location
             db = await loop.run_in_executor(
-                None, lambda: client.databases.get(self.resource_group, sql_server, sql_database)
+                None, lambda: client.databases.get(self.resource_group, sql_server_name, sql_database)
             )
             current_sku = db.sku.name if db.sku else "S1"
             print(f"[Resolution Agent] Current SQL SKU: {current_sku}, scaling up...")
@@ -162,7 +169,7 @@ class ResolutionAgent:
             poller = await loop.run_in_executor(
                 None,
                 lambda: client.databases.begin_create_or_update(
-                    self.resource_group, sql_server, sql_database,
+                    self.resource_group, sql_server_name, sql_database,
                     {"location": db.location, "sku": Sku(name=target_sku)}
                 )
             )
@@ -173,7 +180,7 @@ class ResolutionAgent:
                 "success": True,
                 "action": "scaled_database",
                 "details": f"Scaled from {current_sku} to {target_sku}",
-                "resource": f"{sql_server}/{sql_database}"
+                "resource": f"{sql_server_name}/{sql_database}"
             }
         except Exception as e:
             print(f"[Resolution Agent] Database scaling failed: {e}")
@@ -429,23 +436,37 @@ Requirements:
         import re
         masked = runtime_data.copy()
         
-        # Mask API keys, passwords, tokens
+        # Mask API keys, passwords, tokens — each tuple is (pattern, replacement)
         patterns = [
-            r'(["\']?(?:api_key|password|token|secret)["\']?\s*[:=]\s*)[^,\s}]*',
-            r'((?:https?://)?(?:.*@)?)[^/]+@',  # Email addresses
-            r'\b\d{3}-\d{2}-\d{4}\b',  # SSN
-            r'\b\d{16}\b',  # Credit card
+            (r'(["\']?(?:api_key|password|token|secret)["\']?\s*[:=]\s*)[^,\s}]*', r'\1***MASKED***'),
+            (r'((?:https?://[^@]*@)[^/]+)',  r'\1***MASKED***'),  # Credentials in URLs
+            (r'\b\d{3}-\d{2}-\d{4}\b', '***SSN***'),             # SSN
+            (r'\b\d{16}\b', '***CARD***'),                        # Credit card
         ]
-        
+
         for field in ['error_message', 'stack_trace', 'logs_excerpt']:
             if field in masked:
                 text = masked[field]
-                for pattern in patterns:
-                    text = re.sub(pattern, r'\1***MASKED***', text, flags=re.IGNORECASE)
+                for pattern, replacement in patterns:
+                    text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
                 masked[field] = text
         
         return masked
     
+    async def _call_copilot_suggest(self, context):
+        """Call GitHub Copilot CLI to suggest a fix. Returns None if unavailable."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh", "copilot", "suggest", "-t", "shell", context,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            output = stdout.decode().strip()
+            return output if output else None
+        except Exception:
+            return None
+
     async def generate_fix_with_copilot(self, diagnosis, runtime_data):
         """Generate fix code using GitHub Copilot suggest command with runtime context"""
         try:
