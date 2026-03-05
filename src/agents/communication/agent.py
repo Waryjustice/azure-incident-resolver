@@ -235,7 +235,7 @@ class CommunicationAgent:
     
     async def _save_to_incident_database(self, post_mortem):
         """Save post-mortem to database for future RAG queries"""
-        # TODO: Save to vector database for Microsoft Foundry
+        # TODO: Save to persistent store for future RAG queries (currently in-memory only)
         logger.info(f"[Communication Agent] Saving to incident database: {post_mortem['incident_id']}")
     
     async def _send_post_mortem(self, post_mortem):

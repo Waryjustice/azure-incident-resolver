@@ -148,7 +148,20 @@ python examples/demo-api-rate-limit.py
 
 ---
 
-## 🤖 Multi-Agent System
+## 🎥 Demo Video
+
+> 📹 **[Watch the 2-minute demo](#)** — *link will be added before March 15, 2026 submission*
+
+The demo covers:
+1. Live dashboard — agent cards, metrics, branding badges
+2. Database Connection Pool incident — full 🔍→🧠→🔧→💬→✅ pipeline
+3. New Feature Bug — Copilot code fix path
+4. MTTR updating, resolved incident greyed out
+5. Architecture diagram walkthrough
+
+---
+
+
 
 ### Detection Agent
 **Monitors Azure resources and detects anomalies**
@@ -203,7 +216,22 @@ python examples/demo-api-rate-limit.py
 
 ---
 
-## 📊 Demo Scenarios & Results
+## 💡 Design Decision: GitHub Models over Azure AI Foundry
+
+Originally planned to use **Azure AI Foundry** for AI inference and RAG. Pivoted to **GitHub Models API** because:
+
+- Azure student accounts cannot create Foundry model deployments in all regions (region quota restrictions)
+- GitHub Models provides the **same `gpt-4o-mini` model** at zero cost using only a GitHub token
+- The API is identical — same `ChatCompletionsClient` from `azure-ai-inference` SDK, same endpoint pattern
+- Zero extra infrastructure — no Foundry workspace or deployment to configure
+
+> The `FOUNDRY_ENDPOINT` and `FOUNDRY_API_KEY` variables exist in `.env.example` for completeness  
+> but the system does **not** call Foundry at runtime. All AI inference goes through  
+> `https://models.inference.ai.azure.com` authenticated with `GITHUB_TOKEN`.
+
+---
+
+
 
 ### Scenario 1: Database Connection Pool Exhaustion
 **Incident**: Production database hits 100% connection pool utilization  

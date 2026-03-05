@@ -111,7 +111,6 @@ On resolved incidents, add a "Download Post-Mortem" button that saves the timeli
 | Best Multi-Agent System | $10,000 | **High** | Semantic Kernel ✅, 4-agent pipeline ✅ |
 | Grand Prize - Agentic DevOps | $20,000 | **Medium** | Full pipeline verified end-to-end |
 | Best Enterprise Solution | $10,000 | **Medium** | Live URL + security story |
-| Best Use of Microsoft Foundry | $10,000 | **Low-Medium** | Azure AI Foundry endpoint configured ✅ |
 
 **Best Azure Integration and Best Multi-Agent System are your most winnable categories.**
 

@@ -31,7 +31,7 @@ Azure Incident Resolver is a multi-agent system that automates incident detectio
 ┌─────────────────────────────────────────────────────────────────┐
 │                    DIAGNOSIS AGENT                               │
 │  • Analyzes logs and metrics                                     │
-│  • Microsoft Foundry RAG search                                  │
+│  • GitHub Models AI (gpt-4o-mini) root cause analysis            │
 │  • Identifies root cause                                         │
 └────────────────┬────────────────────────────────────────────────┘
                  │
@@ -77,7 +77,7 @@ Resolution Agent ──[resolution_complete]──> Communication Agent
 ## Technology Stack
 
 ### Core Technologies (Required by Hackathon)
-- **Microsoft Foundry**: Knowledge base and RAG for past incidents
+- **GitHub Models API (gpt-4o-mini)**: AI diagnosis via `azure-ai-inference` SDK — uses GITHUB_TOKEN, no Foundry required
 - **Microsoft Agent Framework**: Multi-agent orchestration
 - **Azure MCP**: Inter-agent communication protocol
 - **GitHub Copilot Agent Mode**: Automated code generation
@@ -106,8 +106,8 @@ Resolution Agent ──[resolution_complete]──> Communication Agent
 2. **Diagnosis Phase**
    - Incident data sent to Diagnosis Agent via Azure MCP
    - Agent queries logs from Application Insights
-   - Microsoft Foundry RAG searches past incidents
-   - Azure OpenAI analyzes data for root cause
+   - In-memory RAG searches last 20 past incidents for similar patterns
+   - GitHub Models (gpt-4o-mini) via azure-ai-inference analyzes data for root cause
 
 3. **Resolution Phase**
    - Diagnosis sent to Resolution Agent

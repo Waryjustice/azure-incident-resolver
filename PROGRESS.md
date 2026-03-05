@@ -68,7 +68,7 @@
 | Log Analytics | `incident-resolver-logs` | ✅ Existing |
 | Service Bus | `incident-resolver-mcp` | ✅ Existing |
 | App Insights | `incident-resolver-insights` | ✅ Created today |
-| AI Foundry | `incident-resolver-foundry` | ✅ Created today |
+| AI Inference | `gpt-4o-mini` via GitHub Models API | ✅ Active (uses GITHUB_TOKEN) |
 | GPT Model | `gpt-4` deployment | ❌ Not deployed (region issue) |
 
 ---
