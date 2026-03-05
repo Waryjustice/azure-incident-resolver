@@ -376,7 +376,10 @@ class ResolutionAgent:
             }
         except Exception as e:
             print(f"[Resolution Agent] Error extracting runtime data: {e}")
-            return None
+            return {
+                "error_message": "", "stack_trace": "", "logs_excerpt": "",
+                "metrics_snapshot": {}, "suspected_file": "", "relevant_code_snippet": ""
+            }
     
     def _prepare_runtime_context(self, diagnosis, runtime_data):
         """Prepare real-time incident-driven context for Copilot"""
@@ -442,9 +445,10 @@ Requirements:
             (r'((?:https?://[^@]*@)[^/]+)',  r'\1***MASKED***'),  # Credentials in URLs
             (r'\b\d{3}-\d{2}-\d{4}\b', '***SSN***'),             # SSN
             (r'\b\d{16}\b', '***CARD***'),                        # Credit card
+            (r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', '***EMAIL***'),  # Email addresses
         ]
 
-        for field in ['error_message', 'stack_trace', 'logs_excerpt']:
+        for field in ['error_message', 'stack_trace', 'logs_excerpt', 'relevant_code_snippet']:
             if field in masked:
                 text = masked[field]
                 for pattern, replacement in patterns:
