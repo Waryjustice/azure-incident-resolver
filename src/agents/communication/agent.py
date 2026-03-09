@@ -11,6 +11,9 @@ This agent:
 import os
 import json
 import logging
+from dotenv import load_dotenv
+
+load_dotenv()
 from datetime import datetime
 import asyncio
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
@@ -249,48 +252,58 @@ class CommunicationAgent:
         if not self.servicebus_connection_string:
             logger.warning("[Communication Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
             return
-        
+
         self.is_listening = True
         logger.info(f"[Communication Agent] Starting to listen for messages on queue: {self.input_queue_name}")
-        
-        try:
-            async with AsyncServiceBusClient.from_connection_string(
-                self.servicebus_connection_string
-            ) as client:
-                async with client.get_queue_receiver(self.input_queue_name) as receiver:
-                    while self.is_listening:
-                        try:
-                            messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
-                            
-                            for message in messages:
-                                # Parse resolution data
-                                resolution_data = json.loads(str(message))
-                                logger.info(f"[Communication Agent] Received resolution: {resolution_data['incident_id']}")
-                                
-                                # Build full incident data for notification
-                                incident_data = {
-                                    "incident_id": resolution_data['incident_id'],
-                                    "resolution": resolution_data,
-                                    "phase": "resolved" if resolution_data.get('status') == "resolved" else "failed"
-                                }
-                                
-                                # Handle lifecycle notifications
-                                await self.handle_incident_lifecycle(incident_data)
-                                
-                                # Generate post-mortem if resolved
-                                if resolution_data.get('status') == "resolved":
-                                    await self.generate_post_mortem(incident_data)
-                                
-                                # Complete the message
-                                await receiver.complete_message(message)
-                                
-                        except asyncio.TimeoutError:
-                            continue
-                        except json.JSONDecodeError as e:
-                            logger.error(f"[Communication Agent] Failed to parse message: {e}")
-                            
-        except Exception as e:
-            logger.error(f"[Communication Agent] Error listening for messages: {e}", exc_info=True)
+
+        while self.is_listening:
+            try:
+                async with AsyncServiceBusClient.from_connection_string(
+                    self.servicebus_connection_string
+                ) as client:
+                    async with client.get_queue_receiver(self.input_queue_name) as receiver:
+                        logger.info("[Communication Agent] Service Bus connection established, waiting for messages...")
+                        while self.is_listening:
+                            try:
+                                messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
+
+                                for message in messages:
+                                    try:
+                                        resolution_data = json.loads(str(message))
+                                        logger.info(f"[Communication Agent] Received resolution: {resolution_data['incident_id']}")
+
+                                        incident_data = {
+                                            "incident_id": resolution_data['incident_id'],
+                                            "resolution": resolution_data,
+                                            "diagnosis": resolution_data.get("diagnosis", {}),
+                                            "detected_at": resolution_data.get("diagnosis", {}).get("diagnosed_at"),
+                                            "phase": "resolved" if resolution_data.get('status') == "resolved" else "failed"
+                                        }
+
+                                        await self.handle_incident_lifecycle(incident_data)
+
+                                        if resolution_data.get('status') == "resolved":
+                                            await self.generate_post_mortem(incident_data)
+
+                                        await receiver.complete_message(message)
+
+                                    except json.JSONDecodeError as e:
+                                        logger.error(f"[Communication Agent] Failed to parse message body: {e}")
+                                        await receiver.dead_letter_message(message, reason="InvalidJSON")
+                                    except Exception as e:
+                                        logger.error(f"[Communication Agent] Failed to process message: {e}", exc_info=True)
+                                        await receiver.abandon_message(message)
+
+                                await asyncio.sleep(0)
+
+                            except asyncio.TimeoutError:
+                                continue
+
+            except Exception as e:
+                logger.error(f"[Communication Agent] Service Bus connection lost: {e}", exc_info=True)
+                if self.is_listening:
+                    logger.info("[Communication Agent] Reconnecting in 5 seconds...")
+                    await asyncio.sleep(5)
 
 
 # Main execution for testing

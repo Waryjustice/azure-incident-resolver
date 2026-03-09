@@ -17,7 +17,7 @@ from typing import List, Dict, Any, Tuple
 from dotenv import load_dotenv
 from azure.monitor.query import LogsQueryClient
 from azure.identity import DefaultAzureCredential
-from azure.servicebus import ServiceBusClient
+from azure.servicebus import ServiceBusClient, ServiceBusMessage
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
 from azure.core.exceptions import HttpResponseError, ClientAuthenticationError, ResourceNotFoundError
 import asyncio
@@ -143,17 +143,19 @@ class DetectionAgent:
             # Execute queries with error handling
             try:
                 logger.debug("Querying CPU metrics from Azure Monitor")
-                cpu_response = self._query_azure_monitor(
+                cpu_response = await asyncio.to_thread(
+                    self._query_azure_monitor,
                     self.workspace_id,
                     cpu_query,
-                    timespan=(datetime.utcnow() - timedelta(minutes=5), datetime.utcnow())
+                    (datetime.utcnow() - timedelta(minutes=5), datetime.utcnow())
                 )
                 
                 logger.debug("Querying Memory metrics from Azure Monitor")
-                memory_response = self._query_azure_monitor(
+                memory_response = await asyncio.to_thread(
+                    self._query_azure_monitor,
                     self.workspace_id,
                     memory_query,
-                    timespan=(datetime.utcnow() - timedelta(minutes=5), datetime.utcnow())
+                    (datetime.utcnow() - timedelta(minutes=5), datetime.utcnow())
                 )
                 
                 # Check CPU metrics
@@ -281,7 +283,6 @@ class DetectionAgent:
                     incident_json = json.dumps(incident)
                     
                     # Create and send message
-                    from azure.servicebus import ServiceBusMessage
                     message = ServiceBusMessage(
                         body=incident_json,
                         subject="incident_detected",
@@ -329,10 +330,11 @@ class DetectionAgent:
             """
             
             logger.debug("Running test query to verify connection...")
-            response = self._query_azure_monitor(
+            response = await asyncio.to_thread(
+                self._query_azure_monitor,
                 self.workspace_id,
                 test_query,
-                timespan=(datetime.utcnow() - timedelta(hours=1), datetime.utcnow())
+                (datetime.utcnow() - timedelta(hours=1), datetime.utcnow())
             )
             
             logger.info("✓ Azure Monitor connection verified successfully")
@@ -399,10 +401,11 @@ class DetectionAgent:
             """
             
             logger.debug("Executing metrics discovery query...")
-            response = self._query_azure_monitor(
+            response = await asyncio.to_thread(
+                self._query_azure_monitor,
                 self.workspace_id,
                 metrics_query,
-                timespan=(datetime.utcnow() - timedelta(hours=24), datetime.utcnow())
+                (datetime.utcnow() - timedelta(hours=24), datetime.utcnow())
             )
             
             metrics = []

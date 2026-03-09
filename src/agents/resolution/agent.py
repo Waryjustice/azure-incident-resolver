@@ -12,7 +12,11 @@ This agent:
 import os
 import json
 import re
+import logging
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 import asyncio
 import subprocess
 import tempfile
@@ -20,6 +24,12 @@ from github import Github
 from azure.identity import DefaultAzureCredential
 from azure.servicebus.aio import ServiceBusClient as AsyncServiceBusClient
 from azure.servicebus import ServiceBusMessage
+from azure.mgmt.sql import SqlManagementClient
+from azure.mgmt.sql.models import Sku
+from azure.mgmt.web import WebSiteManagementClient
+from azure.mgmt.web.models import StringDictionary, CsmSlotEntity
+
+logger = logging.getLogger(__name__)
 
 
 class ResolutionAgent:
@@ -65,6 +75,7 @@ class ResolutionAgent:
             
             resolution = {
                 "incident_id": diagnosis["incident_id"],
+                "diagnosis": diagnosis,
                 "strategy": strategy,
                 "immediate_fix": immediate_result,
                 "permanent_fix": permanent_fix,
@@ -77,10 +88,7 @@ class ResolutionAgent:
             print(f"  Status: {resolution['status']}")
             if pr_result:
                 print(f"  PR Created: {pr_result['url']}")
-            
-            # Send resolution to Communication Agent via Service Bus
-            await self.send_to_communication_agent(resolution)
-            
+
             return resolution
             
         except Exception as e:
@@ -138,9 +146,6 @@ class ResolutionAgent:
     
     async def _scale_database(self, diagnosis):
         """Scale Azure SQL Database to a higher tier using Azure Management SDK"""
-        from azure.mgmt.sql import SqlManagementClient
-        from azure.mgmt.sql.models import Sku
-
         affected = diagnosis.get("affected_resource", {})
         sql_server = self.sql_server or affected.get("sql_server")
         sql_database = self.sql_database or affected.get("sql_database")
@@ -188,8 +193,6 @@ class ResolutionAgent:
     
     async def _restart_service(self, diagnosis):
         """Restart Azure App Service using Azure Management SDK"""
-        from azure.mgmt.web import WebSiteManagementClient
-
         affected = diagnosis.get("affected_resource", {})
         webapp_name = self.webapp_name or affected.get("webapp_name")
 
@@ -218,9 +221,6 @@ class ResolutionAgent:
     
     async def _enable_circuit_breaker(self, diagnosis):
         """Enable circuit breaker by updating Azure App Service application settings"""
-        from azure.mgmt.web import WebSiteManagementClient
-        from azure.mgmt.web.models import StringDictionary
-
         affected = diagnosis.get("affected_resource", {})
         webapp_name = self.webapp_name or affected.get("webapp_name")
 
@@ -260,9 +260,6 @@ class ResolutionAgent:
     
     async def _rollback_deployment(self, diagnosis):
         """Rollback deployment via Azure App Service slot swap or restart"""
-        from azure.mgmt.web import WebSiteManagementClient
-        from azure.mgmt.web.models import CsmSlotEntity
-
         affected = diagnosis.get("affected_resource", {})
         webapp_name = self.webapp_name or affected.get("webapp_name")
 
@@ -436,7 +433,6 @@ Requirements:
     
     def _mask_sensitive_data(self, runtime_data):
         """Mask sensitive information in runtime data"""
-        import re
         masked = runtime_data.copy()
         
         # Mask API keys, passwords, tokens — each tuple is (pattern, replacement)
@@ -518,22 +514,6 @@ Requirements:
 """
         return context.strip()
     
-    def _parse_copilot_output(self, copilot_output, fix_type, diagnosis):
-        """DEPRECATED: Use _parse_copilot_output_runtime instead"""
-        files_to_modify = self._get_files_for_fix_type(fix_type)
-        
-        return {
-            "files": files_to_modify,
-            "changes": [
-                {
-                    "file": files_to_modify[0] if files_to_modify else "src/fix.js",
-                    "diff": copilot_output,
-                    "suggested_by": "github_copilot",
-                    "fix_type": fix_type
-                }
-            ]
-        }
-    
     def _parse_copilot_output_runtime(self, copilot_output, diagnosis, runtime_data):
         """Parse Copilot output using runtime context"""
         try:
@@ -553,26 +533,6 @@ Requirements:
             }
         except Exception as e:
             print(f"[Resolution Agent] Error parsing Copilot output: {e}")
-            return None
-    
-    def _get_files_for_fix_type(self, fix_type):
-        """Get file paths for specific fix type"""
-        file_mapping = {
-            "connection_pooling": ["src/database/connection.js", "src/database/pool.js"],
-            "memory_leak": ["src/services/cache.js", "src/memory/manager.js"],
-            "backoff_retry": ["src/services/api-client.js", "src/utils/retry.js"]
-        }
-        return file_mapping.get(fix_type, ["src/fix.js"])
-    
-    def _generate_fallback_fix(self, fix_type, diagnosis):
-        """DEPRECATED: Use _generate_fallback_from_diagnosis instead"""
-        if fix_type == "connection_pooling":
-            return self._generate_connection_pooling_fix(diagnosis)
-        elif fix_type == "memory_leak":
-            return self._generate_memory_leak_fix(diagnosis)
-        elif fix_type == "backoff_retry":
-            return self._generate_backoff_retry_fix(diagnosis)
-        else:
             return None
     
     def _generate_fallback_from_diagnosis(self, diagnosis):
@@ -595,122 +555,6 @@ Requirements:
         except Exception as e:
             print(f"[Resolution Agent] Error generating fallback: {e}")
             return None
-    
-    def _parse_copilot_output(self, copilot_output, fix_type, diagnosis):
-        """DEPRECATED: Use _parse_copilot_output_runtime instead"""
-        files_to_modify = self._get_files_for_fix_type(fix_type)
-        
-        return {
-            "files": files_to_modify,
-            "changes": [
-                {
-                    "file": files_to_modify[0] if files_to_modify else "src/fix.js",
-                    "diff": copilot_output,
-                    "suggested_by": "github_copilot",
-                    "fix_type": fix_type
-                }
-            ]
-        }
-    
-    def _get_files_for_fix_type(self, fix_type):
-        """Get file paths for specific fix type"""
-        file_mapping = {
-            "connection_pooling": ["src/database/connection.js", "src/database/pool.js"],
-            "memory_leak": ["src/services/cache.js", "src/memory/manager.js"],
-            "backoff_retry": ["src/services/api-client.js", "src/utils/retry.js"]
-        }
-        return file_mapping.get(fix_type, ["src/fix.js"])
-    
-    def _generate_fallback_fix(self, fix_type, diagnosis):
-        """DEPRECATED: Use _generate_fallback_from_diagnosis instead"""
-        if fix_type == "connection_pooling":
-            return self._generate_connection_pooling_fix(diagnosis)
-        elif fix_type == "memory_leak":
-            return self._generate_memory_leak_fix(diagnosis)
-        elif fix_type == "backoff_retry":
-            return self._generate_backoff_retry_fix(diagnosis)
-        else:
-            return None
-
-    
-    async def create_fix_pr(self, diagnosis, permanent_fix):
-        """Call gh copilot command with diagnosis context using stdin"""
-        try:
-            import logging
-            logger = logging.getLogger(__name__)
-            
-            # Use stdin to avoid interactive prompt issue in subprocess
-            # Pass context via stdin ("-") instead of as command argument
-            # This prevents gh copilot from waiting for keyboard input
-            logger.debug(f"[Resolution Agent] Calling Copilot (context: {len(context)} bytes)")
-            
-            result = subprocess.run(
-                ["gh", "copilot", "-p", "-"],  # "-" means read prompt from stdin
-                input=context,                  # Pass prompt via stdin
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=60  # Increased from 30 to 60 seconds for slower networks
-            )
-            
-            if result.returncode == 0:
-                logger.info("[Resolution Agent] ✓ GitHub Copilot generated fix successfully")
-                return result.stdout.strip()
-            else:
-                logger.warning(f"[Resolution Agent] Copilot returned error code {result.returncode}")
-                logger.debug(f"Stderr: {result.stderr[:200] if result.stderr else 'None'}")
-                return None
-                    
-        except FileNotFoundError:
-            logger = logging.getLogger(__name__)
-            logger.error("[Resolution Agent] ⚠️  'gh' command not found. Ensure GitHub CLI is installed.")
-            return None
-        except subprocess.TimeoutExpired:
-            logger = logging.getLogger(__name__)
-            logger.warning("[Resolution Agent] ⚠️  GitHub Copilot suggest command timed out (60s)")
-            return None
-        except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.error(f"[Resolution Agent] Error calling gh copilot suggest: {e}", exc_info=True)
-            return None
-    
-    def _parse_copilot_output(self, copilot_output, fix_type, diagnosis):
-        """Parse and structure Copilot-generated code"""
-        files_to_modify = self._get_files_for_fix_type(fix_type)
-        
-        return {
-            "files": files_to_modify,
-            "changes": [
-                {
-                    "file": files_to_modify[0] if files_to_modify else "src/fix.js",
-                    "diff": copilot_output,
-                    "suggested_by": "github_copilot",
-                    "fix_type": fix_type
-                }
-            ]
-        }
-    
-    def _get_files_for_fix_type(self, fix_type):
-        """Get file paths for specific fix type"""
-        file_mapping = {
-            "connection_pooling": ["src/database/connection.js", "src/database/pool.js"],
-            "memory_leak": ["src/services/cache.js", "src/memory/manager.js"],
-            "backoff_retry": ["src/services/api-client.js", "src/utils/retry.js"]
-        }
-        return file_mapping.get(fix_type, ["src/fix.js"])
-    
-    def _generate_fallback_fix(self, fix_type, diagnosis):
-        """Generate fallback fix when Copilot is unavailable"""
-        if fix_type == "connection_pooling":
-            return self._generate_connection_pooling_fix(diagnosis)
-        elif fix_type == "memory_leak":
-            return self._generate_memory_leak_fix(diagnosis)
-        elif fix_type == "backoff_retry":
-            return self._generate_backoff_retry_fix(diagnosis)
-        else:
-            return None
-
     
     async def create_fix_pr(self, diagnosis, permanent_fix):
         """Create GitHub PR with permanent fix"""
@@ -833,37 +677,54 @@ Requirements:
         if not self.servicebus_connection_string:
             print("[Resolution Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
             return
-        
+
         self.is_listening = True
         print(f"[Resolution Agent] [INFO] Starting to listen for messages on queue: {self.input_queue_name}")
-        
-        try:
-            async with AsyncServiceBusClient.from_connection_string(
-                self.servicebus_connection_string
-            ) as client:
-                async with client.get_queue_receiver(self.input_queue_name) as receiver:
-                    while self.is_listening:
-                        try:
-                            messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
-                            
-                            for message in messages:
-                                # Parse diagnosis data
-                                diagnosis_data = json.loads(str(message))
-                                print(f"[Resolution Agent] [INFO] Received diagnosis: {diagnosis_data['incident_id']}")
-                                
-                                # Process the diagnosis and resolve
-                                resolution = await self.resolve_incident(diagnosis_data)
-                                
-                                # Complete the message
-                                await receiver.complete_message(message)
-                                
-                        except asyncio.TimeoutError:
-                            continue
-                        except json.JSONDecodeError as e:
-                            print(f"[Resolution Agent] [ERROR] Failed to parse message: {e}")
-                            
-        except Exception as e:
-            print(f"[Resolution Agent] [ERROR] Error listening for messages: {e}")
+
+        while self.is_listening:
+            try:
+                async with AsyncServiceBusClient.from_connection_string(
+                    self.servicebus_connection_string
+                ) as client:
+                    async with client.get_queue_receiver(self.input_queue_name) as receiver:
+                        print("[Resolution Agent] [INFO] Service Bus connection established, waiting for messages...")
+                        while self.is_listening:
+                            try:
+                                messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
+
+                                for message in messages:
+                                    try:
+                                        diagnosis_data = json.loads(str(message))
+                                        print(f"[Resolution Agent] [INFO] Received diagnosis: {diagnosis_data['incident_id']}")
+
+                                        resolution = await self.resolve_incident(diagnosis_data)
+
+                                        await receiver.complete_message(message)
+
+                                        if resolution:
+                                            # Only send to next queue when running as a standalone listener
+                                            await self.send_to_communication_agent(resolution)
+                                            print(f"[Resolution Agent] [INFO] Resolution forwarded to communication queue for: {diagnosis_data['incident_id']}")
+                                        else:
+                                            print(f"[Resolution Agent] [WARNING] Resolution returned None for: {diagnosis_data['incident_id']}")
+
+                                    except json.JSONDecodeError as e:
+                                        print(f"[Resolution Agent] [ERROR] Failed to parse message body: {e}")
+                                        await receiver.dead_letter_message(message, reason="InvalidJSON")
+                                    except Exception as e:
+                                        print(f"[Resolution Agent] [ERROR] Failed to process message: {e}")
+                                        await receiver.abandon_message(message)
+
+                                await asyncio.sleep(0)
+
+                            except asyncio.TimeoutError:
+                                continue
+
+            except Exception as e:
+                print(f"[Resolution Agent] [ERROR] Service Bus connection lost: {e}")
+                if self.is_listening:
+                    print("[Resolution Agent] [INFO] Reconnecting in 5 seconds...")
+                    await asyncio.sleep(5)
     
     async def send_to_communication_agent(self, resolution):
         """Send resolution results to communication agent via Service Bus queue"""

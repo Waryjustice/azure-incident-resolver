@@ -1,0 +1,352 @@
+{
+  "generated_at": "2026-03-06T08:49:40.573818+00:00",
+  "summary": {
+    "total": 36,
+    "passed": 36,
+    "failed": 0,
+    "percentage": 100.0
+  },
+  "sections": {
+    "1. Environment Setup": [
+      {
+        "name": "python-dotenv installed",
+        "passed": true,
+        "details": [
+          "python-dotenv is available"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": ".env file present",
+        "passed": true,
+        "details": [
+          "C:\\Users\\shaur\\Downloads\\azure-incident-resolver\\.env"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Required environment variables",
+        "passed": true,
+        "details": [
+          "All 8 required variables are set"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Optional environment variables",
+        "passed": true,
+        "details": [
+          "6/7 optional vars set",
+          "Not set (non-blocking): FLASK_SECRET_KEY"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      }
+    ],
+    "2. Azure Services (Service Bus)": [
+      {
+        "name": "azure-servicebus management SDK importable",
+        "passed": true,
+        "details": [
+          "ServiceBusAdministrationClient available"
+        ],
+        "errors": [],
+        "duration_ms": 375.0
+      },
+      {
+        "name": "Service Bus queue: detection-to-diagnosis",
+        "passed": true,
+        "details": [
+          "Queue exists (name: detection-to-diagnosis)"
+        ],
+        "errors": [],
+        "duration_ms": 703.0
+      },
+      {
+        "name": "Service Bus queue: diagnosis-to-resolution",
+        "passed": true,
+        "details": [
+          "Queue exists (name: diagnosis-to-resolution)"
+        ],
+        "errors": [],
+        "duration_ms": 656.0
+      },
+      {
+        "name": "Service Bus queue: resolution-to-communication",
+        "passed": true,
+        "details": [
+          "Queue exists (name: resolution-to-communication)"
+        ],
+        "errors": [],
+        "duration_ms": 610.0
+      }
+    ],
+    "3. Agent Imports": [
+      {
+        "name": "Import DetectionAgent",
+        "passed": true,
+        "details": [
+          "src.agents.detection.agent.DetectionAgent imported successfully"
+        ],
+        "errors": [],
+        "duration_ms": 172.0
+      },
+      {
+        "name": "Import DiagnosisAgent",
+        "passed": true,
+        "details": [
+          "src.agents.diagnosis.agent.DiagnosisAgent imported successfully"
+        ],
+        "errors": [],
+        "duration_ms": 15.0
+      },
+      {
+        "name": "Import ResolutionAgent",
+        "passed": true,
+        "details": [
+          "src.agents.resolution.agent.ResolutionAgent imported successfully"
+        ],
+        "errors": [],
+        "duration_ms": 125.0
+      },
+      {
+        "name": "Import CommunicationAgent",
+        "passed": true,
+        "details": [
+          "src.agents.communication.agent.CommunicationAgent imported successfully"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      }
+    ],
+    "4. Dashboard": [
+      {
+        "name": "dashboard/app.py exists",
+        "passed": true,
+        "details": [
+          "C:\\Users\\shaur\\Downloads\\azure-incident-resolver\\dashboard\\app.py"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "dashboard/app.py importable",
+        "passed": true,
+        "details": [
+          "Module loaded without errors"
+        ],
+        "errors": [],
+        "duration_ms": 359.0
+      },
+      {
+        "name": "Flask 'app' object present in dashboard",
+        "passed": true,
+        "details": [
+          "app = Flask"
+        ],
+        "errors": [],
+        "duration_ms": 16.0
+      }
+    ],
+    "5. Demo Scenarios": [
+      {
+        "name": "examples/ directory exists",
+        "passed": true,
+        "details": [
+          "C:\\Users\\shaur\\Downloads\\azure-incident-resolver\\examples"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Demo files present (expected 11, found 11)",
+        "passed": true,
+        "details": [
+          "demo-api-rate-limit.py, demo-cache-down.py, demo-cpu-spike.py, demo-database-deadlock.py, demo-database-spike.py, demo-disk-space.py, demo-failed-deployment.py, demo-memory-leak.py, demo-new-feature-bug.py, demo-slow-query.py, demo-ssl-expiring.py"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-api-rate-limit.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-cache-down.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-cpu-spike.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-database-deadlock.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-database-spike.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 16.0
+      },
+      {
+        "name": "Parse demo-disk-space.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-failed-deployment.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-memory-leak.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-new-feature-bug.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-slow-query.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Parse demo-ssl-expiring.py",
+        "passed": true,
+        "details": [
+          "Syntax OK"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      }
+    ],
+    "6. pytest Suite": [
+      {
+        "name": "pytest test files found",
+        "passed": true,
+        "details": [
+          "Found: test_copilot_integration.py, test_copilot_runtime.py"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "pytest suite passes",
+        "passed": true,
+        "details": [
+          "======================= 30 passed, 31 warnings in 6.27s ======================="
+        ],
+        "errors": [],
+        "duration_ms": 7187.0
+      }
+    ],
+    "7. GitHub Connection": [
+      {
+        "name": "GitHub token present",
+        "passed": true,
+        "details": [
+          "Token starts with: ghp_MxRh\u2026"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "GitHub API reachable with token",
+        "passed": true,
+        "details": [
+          "Authenticated as: Waryjustice"
+        ],
+        "errors": [],
+        "duration_ms": 406.0
+      },
+      {
+        "name": "GitHub repo Waryjustice/azure-incident-resolver accessible",
+        "passed": true,
+        "details": [
+          "Repo found: Waryjustice/azure-incident-resolver (public)"
+        ],
+        "errors": [],
+        "duration_ms": 438.0
+      }
+    ],
+    "8. Service Bus Connection": [
+      {
+        "name": "Service Bus connection string present",
+        "passed": true,
+        "details": [
+          "Connection string set (non-placeholder)"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Service Bus SDK importable",
+        "passed": true,
+        "details": [
+          "azure-servicebus imported successfully"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      },
+      {
+        "name": "Service Bus connection attempt",
+        "passed": true,
+        "details": [
+          "Connected to Service Bus namespace successfully"
+        ],
+        "errors": [],
+        "duration_ms": 0.0
+      }
+    ]
+  }
+}

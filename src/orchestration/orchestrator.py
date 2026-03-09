@@ -97,18 +97,41 @@ class IncidentOrchestrator:
         await detection_task
     
     async def _run_detection_loop(self):
-        """Run continuous detection monitoring"""
+        """Run continuous detection monitoring, routing anomalies into the full incident pipeline"""
         while True:
             try:
-                # Check for new incidents
-                await self.detection_agent.check_all_resources()
-                
-                # Wait before next check
+                if not self.detection_agent.monitored_webapp_id:
+                    print("[Orchestrator] ⚠️  MONITORED_WEBAPP_ID not set — skipping detection")
+                    await asyncio.sleep(self.detection_agent.monitoring_interval)
+                    continue
+
+                resource = {
+                    "type": "WebApp",
+                    "id": self.detection_agent.monitored_webapp_id,
+                    "name": "Azure Web App"
+                }
+
+                anomalies = await self.detection_agent.detect_anomalies(resource)
+
+                if anomalies:
+                    print(f"[Orchestrator] 🚨 {len(anomalies)} anomalies detected — starting incident pipeline")
+                    incident = {
+                        "id": f"INC-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+                        "resource": resource,
+                        "anomalies": anomalies,
+                        "detected_at": datetime.utcnow().isoformat(),
+                        "severity": self.detection_agent._calculate_severity(anomalies)
+                    }
+                    # Route directly into the orchestrated pipeline (in-process)
+                    await self.handle_incident(incident)
+                else:
+                    print("[Orchestrator] ✅ No anomalies detected")
+
                 await asyncio.sleep(self.detection_agent.monitoring_interval)
-                
+
             except Exception as e:
                 print(f"[Orchestrator] Error in detection loop: {e}")
-                await asyncio.sleep(60)  # Wait before retry
+                await asyncio.sleep(60)
     
     async def handle_incident(self, incident):
         """

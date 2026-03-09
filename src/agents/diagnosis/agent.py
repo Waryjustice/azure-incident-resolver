@@ -11,7 +11,11 @@ This agent:
 
 import os
 import json
+import re
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 from azure.ai.inference import ChatCompletionsClient
 from azure.ai.inference.models import SystemMessage, UserMessage
 from azure.core.credentials import AzureKeyCredential
@@ -100,10 +104,7 @@ class DiagnosisAgent:
                 "context": context,
                 "resolution_hint": root_cause.get("type", ""),
             })
-            
-            # Send diagnosis to Resolution Agent via Service Bus
-            await self.send_to_resolution_agent(diagnosis)
-            
+
             return diagnosis
             
         except Exception as e:
@@ -176,7 +177,8 @@ class DiagnosisAgent:
         if self._ai_client:
             prompt = self._build_prompt(incident, context, similar_incidents, log_analysis)
             try:
-                response = self._ai_client.complete(
+                response = await asyncio.to_thread(
+                    self._ai_client.complete,
                     messages=[
                         SystemMessage(content=_SYSTEM_PROMPT),
                         UserMessage(content=prompt),
@@ -186,11 +188,10 @@ class DiagnosisAgent:
                     max_tokens=400,
                 )
                 raw = response.choices[0].message.content.strip()
-                # Strip markdown code fences if present
-                if raw.startswith("```"):
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
+                # Strip markdown code fences if present (handles ```json, ```JSON, ``` etc.)
+                raw = re.sub(r'^```[a-zA-Z]*\n?', '', raw)
+                raw = re.sub(r'\n?```$', '', raw)
+                raw = raw.strip()
                 root_cause = json.loads(raw)
                 print(f"[Diagnosis Agent] 🤖 AI diagnosis: {root_cause.get('description', '')}")
                 return root_cause
@@ -290,37 +291,56 @@ Based on this data, identify the root cause."""
         if not self.servicebus_connection_string:
             print("[Diagnosis Agent] ⚠️  AZURE_SERVICEBUS_CONNECTION_STRING not set")
             return
-        
+
         self.is_listening = True
         print(f"[Diagnosis Agent] [INFO] Starting to listen for messages on queue: {self.input_queue_name}")
-        
-        try:
-            async with AsyncServiceBusClient.from_connection_string(
-                self.servicebus_connection_string
-            ) as client:
-                async with client.get_queue_receiver(self.input_queue_name) as receiver:
-                    while self.is_listening:
-                        try:
-                            messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
-                            
-                            for message in messages:
-                                # Parse incident data
-                                incident_data = json.loads(str(message))
-                                print(f"[Diagnosis Agent] [INFO] Received incident: {incident_data['id']}")
-                                
-                                # Process the incident
-                                diagnosis = await self.diagnose_incident(incident_data)
-                                
-                                # Complete the message
-                                await receiver.complete_message(message)
-                                
-                        except asyncio.TimeoutError:
-                            continue
-                        except json.JSONDecodeError as e:
-                            print(f"[Diagnosis Agent] [ERROR] Failed to parse message: {e}")
-                            
-        except Exception as e:
-            print(f"[Diagnosis Agent] [ERROR] Error listening for messages: {e}")
+
+        while self.is_listening:
+            try:
+                async with AsyncServiceBusClient.from_connection_string(
+                    self.servicebus_connection_string
+                ) as client:
+                    async with client.get_queue_receiver(self.input_queue_name) as receiver:
+                        print("[Diagnosis Agent] [INFO] Service Bus connection established, waiting for messages...")
+                        while self.is_listening:
+                            try:
+                                messages = await receiver.receive_messages(max_message_count=1, max_wait_time=5)
+
+                                for message in messages:
+                                    try:
+                                        incident_data = json.loads(str(message))
+                                        print(f"[Diagnosis Agent] [INFO] Received incident: {incident_data['id']}")
+
+                                        diagnosis = await self.diagnose_incident(incident_data)
+
+                                        # Always complete the message to remove it from the queue
+                                        await receiver.complete_message(message)
+
+                                        if diagnosis:
+                                            # Only send to next queue when running as a standalone listener
+                                            await self.send_to_resolution_agent(diagnosis)
+                                            print(f"[Diagnosis Agent] [INFO] Diagnosis forwarded to resolution queue for: {incident_data['id']}")
+                                        else:
+                                            print(f"[Diagnosis Agent] [WARNING] Diagnosis returned None for: {incident_data['id']}")
+
+                                    except json.JSONDecodeError as e:
+                                        print(f"[Diagnosis Agent] [ERROR] Failed to parse message body: {e}")
+                                        await receiver.dead_letter_message(message, reason="InvalidJSON")
+                                    except Exception as e:
+                                        print(f"[Diagnosis Agent] [ERROR] Failed to process message: {e}")
+                                        # Abandon so the message becomes available again (up to max delivery count)
+                                        await receiver.abandon_message(message)
+
+                                await asyncio.sleep(0)  # Yield control to the event loop
+
+                            except asyncio.TimeoutError:
+                                continue
+
+            except Exception as e:
+                print(f"[Diagnosis Agent] [ERROR] Service Bus connection lost: {e}")
+                if self.is_listening:
+                    print("[Diagnosis Agent] [INFO] Reconnecting in 5 seconds...")
+                    await asyncio.sleep(5)
     
     async def send_to_resolution_agent(self, diagnosis):
         """Send diagnosis results to resolution agent via Service Bus queue"""
@@ -352,11 +372,38 @@ Based on this data, identify the root cause."""
 
 # Main execution for testing
 if __name__ == "__main__":
+    import sys
+
     agent = DiagnosisAgent()
-    
-    # Option 1: Listen for messages from detection agent
-    try:
-        asyncio.run(agent.start_listening())
-    except KeyboardInterrupt:
-        print("\n[Diagnosis Agent] Shutting down gracefully...")
-        agent.is_listening = False
+
+    if "--test" in sys.argv or os.getenv("TEST_MODE", "false").lower() == "true":
+        # Standalone test: inject a synthetic incident directly without needing Service Bus
+        print("\n[Diagnosis Agent] TEST MODE — running with synthetic incident\n")
+        test_incident = {
+            "id": f"INC-TEST-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+            "resource": {"type": "Database", "id": "db-prod-001", "name": "Production SQL Database"},
+            "anomalies": [
+                {"metric": "CONNECTION_COUNT", "value": 500, "threshold": 100, "severity": "high"},
+                {"metric": "CPU_PERCENTAGE",   "value": 92,  "threshold": 80,  "severity": "critical"},
+            ],
+            "detected_at": datetime.utcnow().isoformat(),
+            "severity": "high"
+        }
+        import json as _json
+        print(f"[Diagnosis Agent] Injecting test incident: {_json.dumps(test_incident, indent=2)}\n")
+        try:
+            diagnosis = asyncio.run(agent.diagnose_incident(test_incident))
+            if diagnosis:
+                print(f"\n[Diagnosis Agent] ✅ Diagnosis result:")
+                print(_json.dumps(diagnosis, indent=2, default=str))
+            else:
+                print("\n[Diagnosis Agent] ❌ Diagnosis returned None")
+        except KeyboardInterrupt:
+            print("\n[Diagnosis Agent] Test interrupted.")
+    else:
+        # Listen for real messages from the Detection Agent via Service Bus
+        try:
+            asyncio.run(agent.start_listening())
+        except KeyboardInterrupt:
+            print("\n[Diagnosis Agent] Shutting down gracefully...")
+            agent.is_listening = False

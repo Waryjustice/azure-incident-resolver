@@ -15,17 +15,17 @@ echo ""
 # Check prerequisites
 echo "Checking prerequisites..."
 
-# Check Node.js or Python
-if command -v node &> /dev/null; then
-    NODE_VERSION=$(node --version)
-    echo "✓ Node.js installed: $NODE_VERSION"
-    RUNTIME="node"
-elif command -v python3 &> /dev/null; then
+# Check Node.js or Python (project is Python-based; Node.js detection is informational only)
+if command -v python3 &> /dev/null; then
     PYTHON_VERSION=$(python3 --version)
     echo "✓ Python installed: $PYTHON_VERSION"
     RUNTIME="python"
+elif command -v node &> /dev/null; then
+    NODE_VERSION=$(node --version)
+    echo "⚠️  Node.js detected but this project requires Python 3.11+: $NODE_VERSION"
+    RUNTIME="node"
 else
-    echo "✗ Neither Node.js nor Python found. Please install one of them."
+    echo "✗ Python 3.11+ not found. Please install from: https://www.python.org/downloads/"
     exit 1
 fi
 
@@ -42,6 +42,10 @@ echo "Setting up environment..."
 
 # Create .env if it doesn't exist
 if [ ! -f .env ]; then
+    if [ ! -f .env.example ]; then
+        echo "✗ .env.example not found. Cannot create .env template."
+        exit 1
+    fi
     echo "Creating .env file from template..."
     cp .env.example .env
     echo "✓ .env file created"
@@ -56,12 +60,11 @@ fi
 echo ""
 echo "Installing dependencies..."
 
-if [ "$RUNTIME" = "node" ]; then
-    npm install
-    echo "✓ Node.js dependencies installed"
-elif [ "$RUNTIME" = "python" ]; then
+if [ "$RUNTIME" = "python" ]; then
     pip install -r requirements.txt
     echo "✓ Python dependencies installed"
+else
+    echo "✗ Cannot install dependencies without Python 3.11+. Skipping."
 fi
 
 # Create necessary directories
@@ -104,8 +107,8 @@ else
     echo "   python src/orchestration/orchestrator.py"
 fi
 echo ""
-echo "4. Deploy to Azure:"
-echo "   ./scripts/deploy-infrastructure.sh"
+echo "4. Deploy to Azure (push to main branch triggers GitHub Actions):"
+echo "   git push origin main"
 echo ""
 echo "For full documentation, see: docs/deployment.md"
 echo ""

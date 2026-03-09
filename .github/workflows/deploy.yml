@@ -9,31 +9,102 @@ on:
 
 env:
   AZURE_RESOURCE_GROUP: azure-incident-resolver-rg
+  PYTHON_VERSION: '3.11'
 
 jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        node-version: '18'
-    
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
     - name: Install dependencies
-      run: npm install
-    
+      run: pip install -r requirements.txt
+
     - name: Run linting
-      run: npm run lint || echo "Linting skipped"
-    
+      run: flake8 src/ --max-line-length=120 --ignore=E501,W503
+
     - name: Run unit tests
-      run: npm test || echo "Tests skipped in hackathon mode"
-    
-    - name: Run integration tests
-      run: npm run test:integration || echo "Integration tests skipped"
+      run: pytest --tb=short -q
 
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set up Azure Service Bus queues
+      run: |
+        az servicebus queue create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --namespace-name ${{ secrets.AZURE_SERVICEBUS_NAMESPACE }} \
+          --name detection-to-diagnosis || true
+        az servicebus queue create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --namespace-name ${{ secrets.AZURE_SERVICEBUS_NAMESPACE }} \
+          --name diagnosis-to-resolution || true
+        az servicebus queue create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --namespace-name ${{ secrets.AZURE_SERVICEBUS_NAMESPACE }} \
+          --name resolution-to-communication || true
+
+    - name: Deploy Detection Agent to Azure App Service
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ secrets.AZURE_DETECTION_APP_NAME }}
+        package: .
+        startup-command: "python src/agents/detection/agent.py"
+
+    - name: Deploy Diagnosis Agent to Azure App Service
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ secrets.AZURE_DIAGNOSIS_APP_NAME }}
+        package: .
+        startup-command: "python src/agents/diagnosis/agent.py"
+
+    - name: Deploy Resolution Agent to Azure App Service
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ secrets.AZURE_RESOLUTION_APP_NAME }}
+        package: .
+        startup-command: "python src/agents/resolution/agent.py"
+
+    - name: Deploy Communication Agent to Azure App Service
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ secrets.AZURE_COMMUNICATION_APP_NAME }}
+        package: .
+        startup-command: "python src/agents/communication/agent.py"
+
+    - name: Verify deployments
+      run: |
+        echo "All agents deployed successfully"
+        az webapp show --name ${{ secrets.AZURE_DETECTION_APP_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --query "state" -o tsv
