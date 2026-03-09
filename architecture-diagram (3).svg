@@ -167,8 +167,8 @@
   <rect x="500" y="840" width="600" height="170" fill="#F25022" stroke="#D83B01" stroke-width="3" rx="10"/>
   <text x="800" y="870" font-size="20" font-weight="bold" text-anchor="middle" fill="white">🔧 RESOLUTION AGENT</text>
   <text x="800" y="893" font-size="11" text-anchor="middle" fill="white">• Dual-fix strategy: Immediate remediation + Permanent code fix</text>
-  <text x="800" y="910" font-size="11" text-anchor="middle" fill="white">• Real Azure SDK calls: azure-mgmt-sql, azure-mgmt-web, azure-mgmt-compute</text>
-  <text x="800" y="927" font-size="11" text-anchor="middle" fill="white">• Database scaling (S1→S3), VM restart, Pod scaling, Cache flush, Disk cleanup</text>
+  <text x="800" y="910" font-size="11" text-anchor="middle" fill="white">• Real Azure SDK calls: azure-mgmt-sql (DB scaling), azure-mgmt-web (App Service)</text>
+  <text x="800" y="927" font-size="11" text-anchor="middle" fill="white">• Database scaling (S1→S3), App Service restart, Slot swap rollback, Circuit breaker</text>
   <text x="800" y="944" font-size="11" text-anchor="middle" fill="white">• GitHub Copilot Agent Mode for intelligent code generation</text>
   <text x="800" y="961" font-size="11" text-anchor="middle" fill="white">• Auto-creates GitHub PRs with PyGithub (labels: incident-auto-fix, automated)</text>
   <text x="800" y="978" font-size="11" text-anchor="middle" fill="white">• Sensitive data masking (API keys, passwords, PII redacted before external calls)</text>
@@ -223,9 +223,9 @@
   <text x="150" y="1310" font-size="9" text-anchor="middle" fill="#666">1,722 lines</text>
   <text x="150" y="1323" font-size="8" text-anchor="middle" fill="#666">Full coverage</text>
 
-  <text x="320" y="1295" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">✅ 82 Tests</text>
+  <text x="320" y="1295" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">✅ 66 Tests</text>
   <text x="320" y="1310" font-size="9" text-anchor="middle" fill="#666">All passing</text>
-  <text x="320" y="1323" font-size="8" text-anchor="middle" fill="#666">30 pytest + 52 unit</text>
+  <text x="320" y="1323" font-size="8" text-anchor="middle" fill="#666">36 system + 30 pytest</text>
 
   <text x="490" y="1295" font-size="11" font-weight="bold" text-anchor="middle" fill="#333">✅ Security</text>
   <text x="490" y="1310" font-size="9" text-anchor="middle" fill="#666">Data masking</text>
@@ -253,6 +253,6 @@
 
   <!-- Row 2 - Tech Stack -->
   <text x="800" y="1345" font-size="12" font-weight="bold" text-anchor="middle" fill="#333">Technology Stack</text>
-  <text x="800" y="1363" font-size="9" text-anchor="middle" fill="#666">Semantic Kernel 1.4 • Azure Service Bus 7.12 • GitHub Models (gpt-4o-mini) • PyGithub 2.1 • Flask-SocketIO 5.3 • Azure SDKs (mgmt-sql, mgmt-web, mgmt-compute)</text>
+  <text x="800" y="1363" font-size="9" text-anchor="middle" fill="#666">Semantic Kernel 1.4 • Azure Service Bus 7.12 • GitHub Models (gpt-4o-mini) • PyGithub 2.1 • Flask-SocketIO 5.3 • Azure SDKs (mgmt-sql, mgmt-web, monitor-query)</text>
 
 </svg>
