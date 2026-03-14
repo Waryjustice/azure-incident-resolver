@@ -1,5 +1,7 @@
 # Azure Incident Resolver
 
+#Made by Shaurya Singh
+
 > **Sleep soundly. Your AI SRE team is always on call.**
 
 Multi-agent AI system that automatically detects, diagnoses, and resolves production incidents in Azure environments. Reduces MTTR from 45 minutes to under 5 minutes.
