@@ -323,7 +323,7 @@ python src/orchestration/orchestrator.py --test
 
 ## 👥 Team
 
-- **Shaurya Singh** - [Microsoft Learn: Shaurya Singh](https://learn.microsoft.com/en-us/users/shaurya-singh)
+- **Shaurya Singh** - https://innovationstudio.microsoft.com/user/ad6f374c-9563-4e45-9796-822acfcb04c8/hackathon_registrations
 
 *Built for Microsoft AI Dev Days Hackathon 2026*
 
